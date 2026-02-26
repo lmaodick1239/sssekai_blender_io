@@ -233,6 +233,8 @@ def apply_action(
         object.animation_data_clear()
         object.animation_data_create()
         object.animation_data.action = action
+        if hasattr(action, 'slots') and len(action.slots) == 1:
+            object.animation_data.action_slot = action.slots[0]
     else:
         nla_tracks = object.animation_data.nla_tracks
         if not len(nla_tracks):
