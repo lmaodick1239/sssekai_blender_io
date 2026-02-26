@@ -1,0 +1,10 @@
+[project]
+name = "sssekai-blender-io"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fake-bpy-module>=20260220",
+    "sssekai>=0.8.0",
+]

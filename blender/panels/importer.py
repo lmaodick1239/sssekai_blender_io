@@ -15,7 +15,8 @@ from sssekai.unity import sssekai_get_unity_version
 
 import UnityPy
 from UnityPy.enums import ClassIDType
-from UnityPy.classes import AnimationClip, Animator
+from UnityPy.classes import AnimatorController
+from UnityPy.files.ObjectReader import ObjectReader
 
 from ..core.helpers import register_serachable_enum, get_enum_search_op_name
 from ..core.consts import *
@@ -72,24 +73,44 @@ def update_environment(path: str, aux_path: str):
         if os.path.exists(aux_path):
             logger.debug("Loading auxiliary environment: %s" % aux_path)
             sssekai_global.env.load_folder(aux_path)
+
+        # Heur for AnimationClips - AnimatorController helps to classify the AnimationClips into groups
+        animator_controller = dict() # [(id(reader.assets_file), clip.m_PathID)
+        for reader in filter(
+            lambda obj: obj.type == ClassIDType.AnimatorController,
+            sssekai_global.env.objects
+        ):
+            controller = reader.read()
+            controller : AnimatorController
+            for clip in controller.m_AnimationClips:
+                animator_controller[(id(reader.assets_file), clip.m_PathID)] = controller
+        
+        def resolve_container(reader: ObjectReader) -> str:
+            container = reader.container or EMPTY_CONTAINER
+            if reader.type == ClassIDType.AnimationClip:
+                controller = animator_controller.get((id(reader.assets_file), reader.path_id), None)
+                return f'{container}/{controller.m_Name}' if controller else container
+            return container
+
         for hierarchy in hierarchies:
             root = hierarchy.root.game_object
-            container = root.object_reader.container or EMPTY_CONTAINER
+            container = resolve_container(root.object_reader)
             sssekai_global.containers[container].hierarchies[
                 hierarchy.path_id
             ] = hierarchy
         logger.debug("Updating enums")
+
         for reader in filter(
             lambda obj: obj.type == ClassIDType.AnimationClip,
             sssekai_global.env.objects,
         ):
-            container = reader.container or EMPTY_CONTAINER
+            container = resolve_container(reader)
             sssekai_global.containers[container].animations[reader.path_id] = reader
 
         for reader in filter(
             lambda obj: obj.type == ClassIDType.Animator, sssekai_global.env.objects
         ):
-            container = reader.container or EMPTY_CONTAINER
+            container = resolve_container(reader)
             sssekai_global.containers[container].animators[reader.path_id] = reader
 
         for container in sssekai_global.containers.values():
