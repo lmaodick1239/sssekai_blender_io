@@ -261,7 +261,10 @@ class SSSekaiBlenderImportHierarchyOperator(bpy.types.Operator):
                         continue
                     mesh = sm.m_Mesh.read()
                     bone_names = [
-                        hierarchy.nodes[pptr.m_PathID].name for pptr in sm.m_Bones if pptr.m_PathID in hierarchy.nodes
+                        hierarchy.nodes[pptr.m_PathID].name
+                        if pptr.m_PathID in hierarchy.nodes
+                        else f"__MISSING_BONE_{pptr.m_PathID}"
+                        for pptr in sm.m_Bones
                     ]
                     mesh_data, mesh_obj = import_mesh_data(
                         game_object.m_Name, mesh, bone_names

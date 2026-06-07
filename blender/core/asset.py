@@ -369,21 +369,33 @@ def import_mesh_data(
         # See below for normals_split... calls
         if handler.m_Normals:
             vert.normal = swizzle_vector3(*handler.m_Normals[vtx][:3])
-        if deform_layer:
-            boneIndex = handler.m_BoneIndices[vtx]
-            if handler.m_BoneWeights:
-                boneWeight = handler.m_BoneWeights[vtx]
+        if deform_layer and handler.m_BoneIndices:
+            bone_indices = handler.m_BoneIndices[vtx]
+            if handler.m_BoneWeights and vtx < len(handler.m_BoneWeights):
+                bone_weights = handler.m_BoneWeights[vtx]
             else:
-                # Default to 1 otherwise the bone would not have any effect on the skinning
-                # XXX: This is purly emprical to handle some edge cases.
-                boneWeight = [1.0 / len(boneIndex)] * len(boneIndex)
-            for i in range(len(boneIndex)):
-                vertex_group_index = boneIndex[i]
-                if not vertex_group_index in vert[deform_layer]:
-                    vert[deform_layer][vertex_group_index] = boneWeight[i]
-                vert[deform_layer][vertex_group_index] = max(
-                    vert[deform_layer][vertex_group_index], boneWeight[i]
+                # Unity can provide indices without explicit weights in some edge cases.
+                # Prefer a stable default: full influence on the first slot.
+                bone_weights = [0.0] * len(bone_indices)
+                if bone_weights:
+                    bone_weights[0] = 1.0
+            accumulated_weights = dict()
+            for i, group_index in enumerate(bone_indices):
+                group_index = int(group_index)
+                if group_index < 0 or group_index >= len(obj.vertex_groups):
+                    # Keep Unity index-space stable: skip out-of-range influences instead of
+                    # remapping to the wrong vertex group.
+                    continue
+                weight = bone_weights[i] if i < len(bone_weights) else 0.0
+                if weight <= 0.0:
+                    continue
+                accumulated_weights[group_index] = (
+                    accumulated_weights.get(group_index, 0.0) + weight
                 )
+            total_weight = sum(accumulated_weights.values())
+            if total_weight > 0.0:
+                for group_index, weight in accumulated_weights.items():
+                    vert[deform_layer][group_index] = weight / total_weight
     bm.verts.ensure_lookup_table()
     # Indices
     trigs = handler.get_triangles()
