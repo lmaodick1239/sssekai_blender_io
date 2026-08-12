@@ -206,10 +206,44 @@ def time_to_frame(time: float):
     return time * bpy.context.scene.render.fps
 
 
-def create_action(name: str):
-    """Creates a new action"""
+def create_action(name: str, id_type: str = "OBJECT"):
+    """Creates a new action with a typed slot when supported by Blender."""
     action = bpy.data.actions.new(name)
+    slots = getattr(action, "slots", None)
+    if slots is not None:
+        slots.new(id_type=id_type, name="Base Slot")
     return action
+
+
+def action_slot_for_target(action: bpy.types.Action, target: bpy.types.ID):
+    """Return the unique action slot compatible with ``target``.
+
+    Blender versions without slotted actions return ``None``. Blender 5
+    requires an explicit target-compatible slot for action binding.
+    """
+    slots = getattr(action, "slots", None)
+    if slots is None:
+        return None
+
+    target_id_type = target.id_type
+    compatible_slots = [
+        slot for slot in slots if slot.target_id_type == target_id_type
+    ]
+    available_types = [slot.target_id_type for slot in slots]
+    target_name = getattr(target, "name", repr(target))
+    if len(compatible_slots) != 1:
+        raise ValueError(
+            "Action %s has %d compatible slots for target %s (%s); "
+            "available slot ID types: %s"
+            % (
+                action.name,
+                len(compatible_slots),
+                target_name,
+                target_id_type,
+                available_types,
+            )
+        )
+    return compatible_slots[0]
 
 
 def apply_action(
