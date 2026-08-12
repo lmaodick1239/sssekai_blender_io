@@ -1,7 +1,8 @@
 import pytest
 
 bpy = pytest.importorskip("bpy")
-if bpy.app.version < (5, 0, 0):
+bpy_version = getattr(getattr(bpy, "app", None), "version", None)
+if bpy_version is None or bpy_version < (5, 0, 0):
     pytest.skip("requires Blender 5 Action slots", allow_module_level=True)
 
 from blender.core.helpers import action_slot_for_target, create_action
