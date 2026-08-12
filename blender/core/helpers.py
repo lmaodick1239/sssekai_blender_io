@@ -246,8 +246,24 @@ def action_slot_for_target(action: bpy.types.Action, target: bpy.types.ID):
     return compatible_slots[0]
 
 
+def action_curve_count(action: bpy.types.Action) -> int:
+    """Return the number of F-curves in legacy or slotted Actions."""
+    fcurves = getattr(action, "fcurves", None)
+    if fcurves is not None:
+        return len(fcurves)
+
+    count = 0
+    for layer in action.layers:
+        for strip in layer.strips:
+            for slot in action.slots:
+                channelbag = strip.channelbag(slot)
+                if channelbag is not None:
+                    count += len(channelbag.fcurves)
+    return count
+
+
 def apply_action(
-    object: bpy.types.Object,
+    object: bpy.types.ID,
     action: bpy.types.Action,
     use_nla: bool = False,
     nla_always_new_track: bool = False,
@@ -267,8 +283,9 @@ def apply_action(
         object.animation_data_clear()
         object.animation_data_create()
         object.animation_data.action = action
-        if hasattr(action, 'slots') and len(action.slots) == 1:
-            object.animation_data.action_slot = action.slots[0]
+        action_slot = action_slot_for_target(action, object)
+        if action_slot is not None:
+            object.animation_data.action_slot = action_slot
     else:
         nla_tracks = object.animation_data.nla_tracks
         if not len(nla_tracks):
@@ -282,9 +299,18 @@ def apply_action(
         else:
             nla_track = nla_tracks[-1]  # Use the last track if available
         nla_track.name = action.name
-        frame_begin = max(0, action.frame_range[0])
-        strip = nla_track.strips.new(action.name, int(frame_begin), action)
-        strip.action_frame_start = max(0, frame_begin)
+        frame_start, frame_end = action.frame_range
+        timeline_start = max(0, frame_start)
+        strip = nla_track.strips.new(action.name, int(timeline_start), action)
+        strip.action_frame_start = frame_start
+        strip.action_frame_end = frame_end
+        strip.frame_end = timeline_start + max(frame_end - frame_start, 1.0)
+        if hasattr(strip, "action_slot"):
+            action_slot = action_slot_for_target(action, object)
+            if action_slot is not None:
+                strip.action_slot = action_slot
+        if strip.influence <= 0:
+            strip.influence = 1.0
 
 
 def editbone_children_recursive(root: bpy.types.EditBone):

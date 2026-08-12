@@ -20,6 +20,7 @@ from ..core.helpers import (
     ensure_sssekai_shader_blend,
     create_action,
     apply_action,
+    action_curve_count,
     editbone_children_recursive,
     armature_editbone_children_recursive,
     set_obj_bone_parent,
@@ -676,6 +677,14 @@ class SSSekaiBlenderImportSekaiCharacterFaceMotionOperator(bpy.types.Operator):
         anim = anim.read()
         anim = read_animation(anim)
         action = load_sekai_keyshape_animation(anim.Name, anim, crc_table)
+        if action_curve_count(action) == 0:
+            self.report(
+                {"ERROR"},
+                T("Face Shapekey Animation %s generated no curves") % anim.Name,
+            )
+            bpy.context.view_layer.objects.active = active_obj
+            bpy.ops.object.mode_set(mode="OBJECT")
+            return {"CANCELLED"}
         apply_action(
             morph.data.shape_keys,
             action,

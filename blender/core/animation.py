@@ -489,9 +489,14 @@ def load_sekai_keyshape_animation(
     Note:
         KeyShape value range [0,100]
     """
-    action = create_action(name)
-    for attr, curve in data.CurvesT[curve_key].items():
-        bsName = crc_keyshape_table[str(attr)]
+    action = create_action(name, id_type="KEY")
+    for attr, curve in data.CurvesT.get(curve_key, {}).items():
+        bsName = crc_keyshape_table.get(str(attr))
+        if bsName is None:
+            logger.warning(
+                "Face action %s has no shape-key mapping for CRC32 %s", name, attr
+            )
+            continue
         load_fcurves(
             action,
             'key_blocks["%s"].value' % bsName,
