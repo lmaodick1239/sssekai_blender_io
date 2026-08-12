@@ -1,7 +1,7 @@
 bl_info = {
     "name": "SSSekai Blender IO",
     "author": "mos9527",
-    "version": (0, 1, 2),
+    "version": (0, 1, 3),
     "blender": (3, 6, 0),
     "location": "View3D > Sidebar > SSSekai",
     "description": "Unity Game Asset Importer for Blender",
