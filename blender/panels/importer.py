@@ -21,6 +21,10 @@ from UnityPy.files.ObjectReader import ObjectReader
 from ..core.helpers import register_serachable_enum, get_enum_search_op_name
 from ..core.consts import *
 from .. import register_class, register_wm_props, logger
+from ..core.timeline import (
+    TimelineTrackRef,
+    catalog_timeline_tracks as resolve_timeline_tracks,
+)
 
 from ..core.asset import build_scene_hierarchy
 from .. import sssekai_global, SSSekaiEnvironmentContainer
@@ -55,6 +59,56 @@ EMPTY_CONTAINER = "<default>"
 ALL_CONTAINER = "<all>"
 
 
+def _timeline_source_key(reader: ObjectReader) -> str:
+    """Identify a track by its source assets file and Unity path ID."""
+    return f"{id(reader.assets_file)}:{reader.path_id}"
+
+
+def timeline_track_enum(tracks):
+    icons = {"MOTION": "ARMATURE_DATA", "FACE": "SHAPEKEY_DATA"}
+    return [
+        (
+            str(track.source_id),
+            f"{track.parent_name} / {track.name} / {len(track.clips)} clips",
+            "",
+            icons[track.kind],
+            index,
+        )
+        for index, track in enumerate(tracks)
+    ]
+
+
+def catalog_timeline_tracks(objects):
+    """Resolve and key recognized Timeline tracks from the loaded environment."""
+    tracks = []
+    for reader in objects:
+        resolved = resolve_timeline_tracks([reader])
+        if not resolved:
+            continue
+        track = resolved[0]
+        tracks.append(
+            TimelineTrackRef(
+                source_id=_timeline_source_key(reader),
+                parent_name=track.parent_name,
+                name=track.name,
+                kind=track.kind,
+                clips=track.clips,
+            )
+        )
+    return tracks
+
+
+def enumerate_timeline_tracks(context):
+    return sssekai_global.timeline_track_enum or [EMPTY_OPT]
+
+
+def timeline_track_by_id(track_id):
+    return next(
+        (track for track in sssekai_global.timeline_tracks if track.source_id == track_id),
+        None,
+    )
+
+
 def update_environment(path: str, aux_path: str):
     global sssekai_global
 
@@ -73,6 +127,11 @@ def update_environment(path: str, aux_path: str):
         if os.path.exists(aux_path):
             logger.debug("Loading auxiliary environment: %s" % aux_path)
             sssekai_global.env.load_folder(aux_path)
+
+        sssekai_global.timeline_tracks = catalog_timeline_tracks(sssekai_global.env.objects)
+        sssekai_global.timeline_track_enum = timeline_track_enum(
+            sssekai_global.timeline_tracks
+        )
 
         # Heur for AnimationClips - AnimatorController helps to classify the AnimationClips into groups
         animator_controller = dict() # [(id(reader.assets_file), clip.m_PathID)
@@ -125,6 +184,8 @@ def update_environment(path: str, aux_path: str):
         )
     else:
         sssekai_global.container_enum.clear()
+        sssekai_global.timeline_tracks.clear()
+        sssekai_global.timeline_track_enum.clear()
 
 
 def enumerate_containers(obj: bpy.types.Object, context: bpy.types.Context):
@@ -153,6 +214,28 @@ def enumerate_prop(container_selection_key: str, prop: str):
     return inner
 
 
+register_serachable_enum(
+    "sssekai_selected_motion_track",
+    name=T("Motion Track"),
+    description=T("Selected Timeline motion track"),
+    items=lambda obj, context: [
+        entry
+        for entry in enumerate_timeline_tracks(context)
+        if timeline_track_by_id(entry[0]) is not None
+        and timeline_track_by_id(entry[0]).kind == "MOTION"
+    ] or [EMPTY_OPT],
+)
+register_serachable_enum(
+    "sssekai_selected_face_track",
+    name=T("Face Track"),
+    description=T("Selected Timeline face track"),
+    items=lambda obj, context: [
+        entry
+        for entry in enumerate_timeline_tracks(context)
+        if timeline_track_by_id(entry[0]) is not None
+        and timeline_track_by_id(entry[0]).kind == "FACE"
+    ] or [EMPTY_OPT],
+)
 register_serachable_enum(
     "sssekai_selected_hierarchy_container",
     name=T("Container"),

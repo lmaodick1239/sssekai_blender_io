@@ -135,6 +135,8 @@ class SSSekaiGlobalEnvironment:
         default_factory=lambda: defaultdict(SSSekaiEnvironmentContainer)
     )
     container_enum: List[Tuple[str, str, str, str, int]] = field(default_factory=list)
+    timeline_tracks: list = field(default_factory=list)
+    timeline_track_enum: list = field(default_factory=list)
     # --- RLA
     rla_sekai_streaming_live_bundle_path: str = None
     rla_header: dict = field(default_factory=dict)
@@ -163,6 +165,8 @@ class SSSekaiGlobalEnvironment:
         self.env_aux_path = ""
         self.containers.clear()
         self.container_enum.clear()
+        self.timeline_tracks.clear()
+        self.timeline_track_enum.clear()
         self.texture_cache.clear()
         self.material_cache.clear()
 
