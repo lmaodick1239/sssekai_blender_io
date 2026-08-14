@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sssekai_blender_io.blender.core.timeline import (
     TimelineClipSpec,
@@ -25,6 +25,15 @@ class Reader:
     def read(self):
         self.read_count += 1
         return self.value
+
+
+class FailingReader:
+    def __init__(self, path_id, error="read failed"):
+        self.path_id = path_id
+        self.error = error
+
+    def read(self):
+        raise RuntimeError(self.error)
 
 
 class Group:
@@ -213,6 +222,28 @@ def test_timeline_models_are_immutable():
         track.name = "changed"
 
 
+def test_captured_metadata_is_deeply_immutable_and_detached_from_sources():
+    transition_curve = {"keys": [{"time": 0.0, "value": 1.0}]}
+    target_position = [1.0, {"axis": "y", "value": 2.0}]
+    clip, _, _ = make_clip(
+        "nested metadata",
+        80,
+        m_MixInCurve=transition_curve,
+        playable={"m_MatchTargetPosition": target_position},
+    )
+
+    spec = resolve_timeline_clip(clip, source_order=0)
+    transition_curve["keys"][0]["value"] = 99.0
+    target_position[1]["value"] = 99.0
+
+    assert spec.transition_metadata["m_MixInCurve"]["keys"][0]["value"] == 1.0
+    assert spec.playable_metadata["m_MatchTargetPosition"][1]["value"] == 2.0
+    with pytest.raises(TypeError):
+        spec.transition_metadata["m_MixInCurve"]["keys"][0]["value"] = 3.0
+    with pytest.raises(TypeError):
+        spec.playable_metadata["m_MatchTargetPosition"][1]["value"] = 3.0
+
+
 def test_unresolved_asset_reference_has_typed_track_and_clip_context():
     clip = TimelineClip("broken clip", Reader(None, 222))
     track_reader = make_track("Character broken", "Motion Group", 111, [clip])
@@ -229,7 +260,32 @@ def test_unresolved_asset_reference_has_typed_track_and_clip_context():
     assert "broken clip" in str(error)
 
 
-def test_unresolved_animation_reference_has_typed_clip_context():
+def test_unreadable_track_reference_has_typed_track_context():
+    with pytest.raises(TimelineResolutionError) as raised:
+        discover_timeline_tracks([FailingReader(444)])
+
+    error = raised.value
+    assert error.track_source_id == 444
+    assert error.track_name is None
+    assert "unresolved track reference" in str(error)
+
+
+def test_unreadable_parent_reference_has_typed_track_context():
+    track_reader = Reader(
+        Track("broken parent", FailingReader(555), []),
+        111,
+    )
+
+    with pytest.raises(TimelineResolutionError) as raised:
+        discover_timeline_tracks([track_reader])
+
+    error = raised.value
+    assert error.track_source_id == 111
+    assert error.track_name == "broken parent"
+    assert "unresolved parent reference" in str(error)
+
+
+def test_unresolved_animation_reference_preserves_asset_and_animation_ids():
     clip = TimelineClip(
         "missing animation",
         Reader(PlayableAsset(Reader(None, 333)), 222),
@@ -240,9 +296,18 @@ def test_unresolved_animation_reference_has_typed_clip_context():
 
     error = raised.value
     assert error.clip_source_id == 222
+    assert error.animation_source_id == 333
     assert error.clip_display_name == "missing animation"
     assert error.source_order == 4
     assert "missing animation" in str(error)
+
+
+def test_unrecognized_groups_remain_ignored_even_with_broken_clips():
+    broken_clip = TimelineClip("ignored broken clip", Reader(None, 666))
+
+    assert discover_timeline_tracks(
+        [make_track("ignored track", "Other Group", 667, [broken_clip])]
+    ) == []
 
 
 def test_resolver_source_has_no_mvdata_dependency_or_file_access():

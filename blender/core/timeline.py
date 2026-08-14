@@ -72,12 +72,14 @@ class TimelineResolutionError(ValueError):
         track_source_id: Any = None,
         track_name: str | None = None,
         clip_source_id: Any = None,
+        animation_source_id: Any = None,
         clip_display_name: str | None = None,
         source_order: int | None = None,
     ) -> None:
         self.track_source_id = track_source_id
         self.track_name = track_name
         self.clip_source_id = clip_source_id
+        self.animation_source_id = animation_source_id
         self.clip_display_name = clip_display_name
         self.source_order = source_order
         context = []
@@ -89,6 +91,8 @@ class TimelineResolutionError(ValueError):
             context.append(f"clip={clip_display_name!r}")
         if clip_source_id is not None:
             context.append(f"clip_source_id={clip_source_id!r}")
+        if animation_source_id is not None:
+            context.append(f"animation_source_id={animation_source_id!r}")
         if source_order is not None:
             context.append(f"source_order={source_order}")
         detail = f" ({', '.join(context)})" if context else ""
@@ -109,12 +113,23 @@ def _read_reference(
     label: str,
     clip_display_name: str,
     source_order: int,
+    clip_source_id: Any = None,
+    animation_source_id: Any = None,
 ) -> Any:
     reference_id = _source_id(reference)
+    diagnostic_clip_source_id = (
+        reference_id if clip_source_id is None else clip_source_id
+    )
+    diagnostic_animation_source_id = (
+        reference_id
+        if animation_source_id is None and label == "animation clip"
+        else animation_source_id
+    )
     if reference is None or not callable(getattr(reference, "read", None)):
         raise TimelineResolutionError(
             f"unresolved {label} reference",
-            clip_source_id=reference_id,
+            clip_source_id=diagnostic_clip_source_id,
+            animation_source_id=diagnostic_animation_source_id,
             clip_display_name=clip_display_name,
             source_order=source_order,
         )
@@ -123,23 +138,45 @@ def _read_reference(
     except Exception as error:
         raise TimelineResolutionError(
             f"unresolved {label} reference: {error}",
-            clip_source_id=reference_id,
+            clip_source_id=diagnostic_clip_source_id,
+            animation_source_id=diagnostic_animation_source_id,
             clip_display_name=clip_display_name,
             source_order=source_order,
         ) from error
     if value is None:
         raise TimelineResolutionError(
             f"unresolved {label} reference",
-            clip_source_id=reference_id,
+            clip_source_id=diagnostic_clip_source_id,
+            animation_source_id=diagnostic_animation_source_id,
             clip_display_name=clip_display_name,
             source_order=source_order,
         )
     return value
 
 
+def _deep_freeze(value: Any) -> Any:
+    """Copy nested containers into immutable equivalents."""
+
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {_deep_freeze(key): _deep_freeze(item) for key, item in value.items()}
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_deep_freeze(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_deep_freeze(item) for item in value)
+    if isinstance(value, bytearray):
+        return bytes(value)
+    return value
+
+
 def _metadata(value: Any, fields: tuple[str, ...]) -> Mapping[str, Any]:
     return MappingProxyType(
-        {field: getattr(value, field) for field in fields if hasattr(value, field)}
+        {
+            field: _deep_freeze(getattr(value, field))
+            for field in fields
+            if hasattr(value, field)
+        }
     )
 
 
@@ -148,11 +185,13 @@ def resolve_timeline_clip(clip: Any, source_order: int) -> TimelineClipSpec:
 
     display_name = _clip_display_name(clip)
     asset_reader = getattr(clip, "m_Asset", None)
+    asset_source_id = _source_id(asset_reader)
     playable = _read_reference(
         asset_reader,
         label="playable asset",
         clip_display_name=display_name,
         source_order=source_order,
+        clip_source_id=asset_source_id,
     )
     animation_reader = getattr(playable, "m_Clip", None)
     _read_reference(
@@ -160,6 +199,8 @@ def resolve_timeline_clip(clip: Any, source_order: int) -> TimelineClipSpec:
         label="animation clip",
         clip_display_name=display_name,
         source_order=source_order,
+        clip_source_id=asset_source_id,
+        animation_source_id=_source_id(animation_reader),
     )
     return TimelineClipSpec(
         source_id=_source_id(animation_reader),
@@ -191,27 +232,45 @@ def discover_timeline_tracks(objects: Iterable[Any]) -> list[TimelineTrackRef]:
     for track_reader in objects:
         if not callable(getattr(track_reader, "read", None)):
             continue
+        track_source_id = _source_id(track_reader)
         try:
             track = track_reader.read()
-        except Exception:
-            continue
+        except Exception as error:
+            raise TimelineResolutionError(
+                f"unresolved track reference: {error}",
+                track_source_id=track_source_id,
+            ) from error
         if track is None:
-            continue
+            raise TimelineResolutionError(
+                "unresolved track reference",
+                track_source_id=track_source_id,
+            )
+        track_name = getattr(track, "m_Name", "")
         parent_reader = getattr(track, "m_Parent", None)
         if not callable(getattr(parent_reader, "read", None)):
-            continue
+            raise TimelineResolutionError(
+                "unresolved parent reference",
+                track_source_id=track_source_id,
+                track_name=track_name,
+            )
         try:
             parent = parent_reader.read()
-        except Exception:
-            continue
+        except Exception as error:
+            raise TimelineResolutionError(
+                f"unresolved parent reference: {error}",
+                track_source_id=track_source_id,
+                track_name=track_name,
+            ) from error
         if parent is None:
-            continue
+            raise TimelineResolutionError(
+                "unresolved parent reference",
+                track_source_id=track_source_id,
+                track_name=track_name,
+            )
         parent_name = getattr(parent, "m_Name", "")
         kind = _track_kind(parent_name)
         if kind is None:
             continue
-        track_source_id = _source_id(track_reader)
-        track_name = getattr(track, "m_Name", "")
         resolved_clips = []
         for source_order, clip in enumerate(getattr(track, "m_Clips", ()) or ()):
             try:
@@ -222,6 +281,7 @@ def discover_timeline_tracks(objects: Iterable[Any]) -> list[TimelineTrackRef]:
                     track_source_id=track_source_id,
                     track_name=track_name,
                     clip_source_id=error.clip_source_id,
+                    animation_source_id=error.animation_source_id,
                     clip_display_name=error.clip_display_name,
                     source_order=error.source_order,
                 ) from error
