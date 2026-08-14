@@ -1,6 +1,7 @@
 """Pure Unity Timeline track discovery and playable-asset resolution."""
 
 from dataclasses import dataclass
+import math
 from types import MappingProxyType
 from typing import Any, Iterable, Literal, Mapping
 
@@ -49,6 +50,16 @@ class TimelineClipSpec:
     extrapolation_metadata: Mapping[str, Any]
     playable_metadata: Mapping[str, Any]
     source_order: int
+
+
+@dataclass(frozen=True)
+class TimelineFrameRange:
+    """Scene-frame and inner-action bounds for one Timeline clip."""
+
+    timeline_start: float
+    timeline_end: float
+    action_start: float
+    action_end: float
 
 
 @dataclass(frozen=True)
@@ -215,6 +226,112 @@ def resolve_timeline_clip(clip: Any, source_order: int) -> TimelineClipSpec:
         playable_metadata=_metadata(playable, _PLAYABLE_FIELDS),
         source_order=source_order,
     )
+
+
+_FRAME_TOLERANCE = 1e-3
+
+
+def _finite_number(value: Any, label: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{label} must be finite") from error
+    if not math.isfinite(number):
+        raise ValueError(f"{label} must be finite")
+    return number
+
+
+def timeline_clip_frames(spec: TimelineClipSpec, fps: float) -> TimelineFrameRange:
+    """Convert authored Timeline seconds to scene frames using one FPS."""
+
+    scene_fps = _finite_number(fps, "fps")
+    if scene_fps <= 0:
+        raise ValueError("fps must be positive")
+    start_seconds = _finite_number(spec.start_seconds, "start_seconds")
+    duration_seconds = _finite_number(spec.duration_seconds, "duration_seconds")
+    clip_in_seconds = _finite_number(spec.clip_in_seconds, "clip_in_seconds")
+    time_scale = _finite_number(spec.time_scale, "time_scale")
+    if duration_seconds <= 0:
+        raise ValueError("duration_seconds must be positive")
+    if time_scale <= 0:
+        raise ValueError("time_scale must be positive")
+    if clip_in_seconds < 0:
+        raise ValueError("clip_in_seconds must be nonnegative")
+
+    timeline_start = start_seconds * scene_fps
+    timeline_end = timeline_start + duration_seconds * scene_fps
+    action_start = clip_in_seconds * scene_fps
+    action_end = action_start + duration_seconds * time_scale * scene_fps
+    if action_end <= action_start:
+        raise ValueError("action_end must be greater than action_start")
+    return TimelineFrameRange(timeline_start, timeline_end, action_start, action_end)
+
+
+def _metadata_enabled(value: Any) -> bool:
+    if value is None or value is False:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0 and math.isfinite(float(value))
+    if isinstance(value, (str, bytes)):
+        return value not in ("", "0", "None", "NoneMode", "Hold")
+    return bool(value)
+
+
+def validate_timeline_clip(
+    spec: TimelineClipSpec,
+    action_frame_range: tuple[float, float],
+    fps: float,
+) -> list[str]:
+    """Validate timing and report finite approximations for unsupported semantics."""
+
+    frames = timeline_clip_frames(spec, fps)
+    try:
+        action_start = _finite_number(action_frame_range[0], "action frame start")
+        action_end = _finite_number(action_frame_range[1], "action frame end")
+    except (IndexError, TypeError) as error:
+        raise ValueError("action_frame_range must contain two finite frames") from error
+    if action_end <= action_start:
+        raise ValueError("action frame range must be increasing")
+    if (
+        abs(action_start - frames.action_start) > _FRAME_TOLERANCE
+        or abs(action_end - frames.action_end) > _FRAME_TOLERANCE
+    ):
+        raise ValueError(
+            "generated Action frame range does not match requested Timeline range"
+        )
+
+    warnings: list[str] = []
+    if any(
+        _metadata_enabled(spec.transition_metadata.get(field))
+        for field in _TRANSITION_FIELDS
+    ):
+        warnings.append("nonzero Timeline ease/blend/mix metadata is not applied")
+
+    if any(
+        _metadata_enabled(value)
+        for field, value in spec.extrapolation_metadata.items()
+        if field.endswith("Mode") and str(value) not in ("None", "NoneMode", "")
+    ) or any(
+        _metadata_enabled(value)
+        for field, value in spec.extrapolation_metadata.items()
+        if field.endswith("Time")
+    ):
+        warnings.append("non-default Timeline extrapolation is not applied")
+
+    playable = spec.playable_metadata
+    if _metadata_enabled(playable.get("m_Loop")):
+        warnings.append("Timeline looping is not applied")
+    if any(
+        _metadata_enabled(playable.get(field))
+        for field in ("m_MatchTargetFields", "m_MatchTargetPosition", "m_MatchTargetRotation")
+    ):
+        warnings.append("Timeline root matching is not applied")
+    if any(
+        _metadata_enabled(playable.get(field))
+        for field in ("m_ApplyFootIK", "m_ApplyPlayableIK")
+    ):
+        warnings.append("Timeline foot IK is not applied")
+    return warnings
 
 
 def _track_kind(parent_name: str) -> TimelineTrackKind | None:

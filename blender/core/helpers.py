@@ -313,6 +313,76 @@ def apply_action(
             strip.influence = 1.0
 
 
+def _ensure_nla_tracks(target: bpy.types.ID):
+    if not target.animation_data:
+        target.animation_data_create()
+    return target.animation_data.nla_tracks
+
+
+def _track_available_for_frame(track, timeline_start: float) -> bool:
+    return not track.strips or max(strip.frame_end for strip in track.strips) <= timeline_start
+
+
+def place_action_strip(
+    target: bpy.types.ID,
+    action: bpy.types.Action,
+    timeline_start: float,
+    timeline_duration: float,
+    action_start: float,
+    action_end: float,
+    track_group: str,
+    name: str | None = None,
+) -> bpy.types.NlaStrip:
+    """Place an Action at explicit scene frames on the first compatible NLA track."""
+
+    values = {
+        "timeline_start": timeline_start,
+        "timeline_duration": timeline_duration,
+        "action_start": action_start,
+        "action_end": action_end,
+    }
+    if any(not isinstance(value, (int, float)) for value in values.values()):
+        raise ValueError("NLA placement frame values must be numeric")
+    if timeline_duration <= 0:
+        raise ValueError("timeline_duration must be positive")
+    if action_end <= action_start:
+        raise ValueError("action_end must be greater than action_start")
+
+    nla_tracks = _ensure_nla_tracks(target)
+    nla_track = next(
+        (track for track in nla_tracks if _track_available_for_frame(track, timeline_start)),
+        None,
+    )
+    if nla_track is None:
+        nla_track = nla_tracks.new()
+    nla_track.name = track_group
+    strip_name = name or action.name
+    strip = nla_track.strips.new(strip_name, timeline_start, action)
+    strip.action_frame_start = action_start
+    strip.action_frame_end = action_end
+    strip.frame_end = timeline_start + timeline_duration
+    if hasattr(strip, "action_slot"):
+        action_slot = action_slot_for_target(action, target)
+        if action_slot is not None:
+            strip.action_slot = action_slot
+    if strip.influence <= 0:
+        strip.influence = 1.0
+    return strip
+
+
+def append_start_frame(target: bpy.types.ID) -> float:
+    """Return the latest NLA endpoint on this target, independent of other targets."""
+
+    animation_data = getattr(target, "animation_data", None)
+    nla_tracks = getattr(animation_data, "nla_tracks", None)
+    if not nla_tracks:
+        return 0.0
+    return max(
+        (strip.frame_end for track in nla_tracks for strip in track.strips),
+        default=0.0,
+    )
+
+
 def editbone_children_recursive(root: bpy.types.EditBone):
     """Yields a tuple of (parent, child, depth) for children of a edit bone.
 
