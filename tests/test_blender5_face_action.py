@@ -16,6 +16,7 @@ from blender.core.helpers import (
     apply_action,
     create_action,
     create_action_fcurve,
+    place_action_strip,
 )
 
 
@@ -105,6 +106,31 @@ def test_apply_key_action_nla_uses_full_range_and_compatible_slot():
         assert strip.action_frame_start == 0.0
         assert strip.action_frame_end == 120.0
         assert strip.frame_end - strip.frame_start == 120.0
+        assert strip.influence > 0.0
+    finally:
+        _cleanup_action(action)
+        _remove_shape_key_target(mesh, obj, key)
+
+
+def test_place_key_action_strip_uses_explicit_ranges_and_key_slot():
+    mesh, obj, key = _shape_key_target("face-explicit-nla-test")
+    action = _key_action("face-explicit-nla-action", 120.0)
+    try:
+        strip = place_action_strip(
+            key.id_data,
+            action,
+            timeline_start=12.5,
+            timeline_duration=30.25,
+            action_start=15.0,
+            action_end=75.5,
+            track_group="Face Group",
+            name="explicit-face-strip",
+        )
+        assert strip.frame_start == 12.5
+        assert strip.frame_end == 42.75
+        assert strip.action_frame_start == 15.0
+        assert strip.action_frame_end == 75.5
+        assert strip.action_slot.target_id_type == "KEY"
         assert strip.influence > 0.0
     finally:
         _cleanup_action(action)

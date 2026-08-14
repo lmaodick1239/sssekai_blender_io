@@ -273,7 +273,7 @@ def _metadata_enabled(value: Any) -> bool:
     if isinstance(value, (int, float)):
         return value != 0 and math.isfinite(float(value))
     if isinstance(value, (str, bytes)):
-        return value not in ("", "0", "None", "NoneMode", "Hold")
+        return value not in ("", "0", "None", "NoneMode")
     return bool(value)
 
 

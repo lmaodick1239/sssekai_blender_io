@@ -1,6 +1,5 @@
 """Task 2 tests that run without a Blender or pytest runtime."""
 
-from dataclasses import replace
 import importlib.util
 from pathlib import Path
 import sys
@@ -183,7 +182,16 @@ def test_timeline_frames_reject_invalid_duration_scale_and_clip_in():
     _raises(ValueError, lambda: TIMELINE.timeline_clip_frames(_spec(duration_seconds=0), 30.0))
     _raises(ValueError, lambda: TIMELINE.timeline_clip_frames(_spec(time_scale=-1), 30.0))
     _raises(ValueError, lambda: TIMELINE.timeline_clip_frames(_spec(clip_in_seconds=-0.1), 30.0))
-    _raises(ValueError, lambda: TIMELINE.timeline_clip_frames(_spec(duration_seconds=float("nan")), 30.0))
+    for field in ("start_seconds", "duration_seconds", "clip_in_seconds", "time_scale"):
+        for invalid in (float("nan"), float("inf"), float("-inf")):
+            _raises(
+                ValueError,
+                lambda field=field, invalid=invalid: TIMELINE.timeline_clip_frames(
+                    _spec(**{field: invalid}), 30.0
+                ),
+            )
+    for fps in (float("nan"), float("inf"), float("-inf")):
+        _raises(ValueError, lambda fps=fps: TIMELINE.timeline_clip_frames(_spec(), fps))
 
 
 def test_validation_rejects_action_range_mismatch_and_returns_finite_semantic_warnings():
@@ -211,6 +219,20 @@ def test_validation_rejects_action_range_mismatch_and_returns_finite_semantic_wa
     )
 
 
+def test_validation_warns_for_nondefault_hold_extrapolation():
+    spec = _spec(extrapolation_metadata={"m_PostExtrapolationMode": "Hold"})
+
+    warnings = TIMELINE.validate_timeline_clip(spec, (15.0, 195.0), 30.0)
+
+    assert any("extrapolation" in warning.lower() for warning in warnings)
+
+
+def test_validation_accepts_documented_default_extrapolation_sentinel():
+    spec = _spec(extrapolation_metadata={"m_PostExtrapolationMode": "None"})
+
+    assert TIMELINE.validate_timeline_clip(spec, (15.0, 195.0), 30.0) == []
+
+
 def test_validation_accepts_action_range_with_small_float_tolerance():
     warnings = TIMELINE.validate_timeline_clip(_spec(), (15.0005, 194.9995), 30.0)
 
@@ -221,25 +243,25 @@ def test_place_action_strip_reuses_gap_and_separates_overlap_without_truncation(
     target = FakeTarget()
     action = FakeAction()
     first = HELPERS.place_action_strip(
-        target, action, 0.25, 10.5, 10.25, 90.75, "Motion Group", name="first"
-    )
-    gap = HELPERS.place_action_strip(
-        target, action, 100.5, 5.25, 10.25, 90.75, "Motion Group", name="gap"
+        target, action, 0.25, 100.5, 10.25, 90.75, "Motion Group", name="first"
     )
     overlap = HELPERS.place_action_strip(
         target, action, 50.5, 5.25, 10.25, 90.75, "Motion Group", name="overlap"
+    )
+    gap = HELPERS.place_action_strip(
+        target, action, 200.5, 5.25, 10.25, 90.75, "Motion Group", name="gap"
     )
 
     tracks = target.animation_data.nla_tracks
     assert len(tracks) == 2
     assert first.frame_start == 0.25
-    assert first.frame_end == 10.75
+    assert first.frame_end == 100.75
     assert first.action_frame_start == 10.25
     assert first.action_frame_end == 90.75
     assert gap in tracks[0].strips
     assert overlap in tracks[1].strips
-    assert gap.frame_start == 100.5
-    assert gap.frame_end == 105.75
+    assert gap.frame_start == 200.5
+    assert gap.frame_end == 205.75
     assert first.influence > 0.0
 
 
@@ -255,12 +277,43 @@ def test_append_start_frame_isolated_to_target_nla_tracks():
     assert HELPERS.append_start_frame(FakeTarget()) == 0.0
 
 
+def test_place_action_strip_rejects_nonfinite_frame_values():
+    for field in ("timeline_start", "timeline_duration", "action_start", "action_end"):
+        for invalid in (float("nan"), float("inf"), float("-inf")):
+            values = dict(
+                timeline_start=1.5,
+                timeline_duration=2.25,
+                action_start=10.25,
+                action_end=12.5,
+                track_group="Motion Group",
+            )
+            values[field] = invalid
+            _raises(
+                ValueError,
+                lambda values=values: HELPERS.place_action_strip(
+                    FakeTarget(), FakeAction(), **values
+                ),
+            )
+
+
 def test_place_action_strip_binds_compatible_action_slot():
     target = FakeTarget()
     action = FakeAction(slot_type="OBJECT")
 
     strip = HELPERS.place_action_strip(
         target, action, 1.5, 2.25, 10.25, 12.5, "Motion Group"
+    )
+
+    assert strip.action_slot is action.slots[0]
+
+
+def test_place_action_strip_binds_key_slot_for_ordered_face_placements():
+    target = FakeTarget()
+    action = FakeAction(name="face-action", slot_type="KEY")
+    target.id_type = "KEY"
+
+    strip = HELPERS.place_action_strip(
+        target, action, 0.25, 2.25, 10.25, 12.5, "Face Group"
     )
 
     assert strip.action_slot is action.slots[0]

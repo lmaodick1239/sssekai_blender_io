@@ -1,3 +1,4 @@
+import math
 import bpy
 from typing import Dict
 from .math import blMatrix, blVector
@@ -333,7 +334,11 @@ def place_action_strip(
     track_group: str,
     name: str | None = None,
 ) -> bpy.types.NlaStrip:
-    """Place an Action at explicit scene frames on the first compatible NLA track."""
+    """Place an Action at explicit scene frames on the first compatible NLA track.
+
+    Callers must submit clips in nondecreasing timeline-start/source-order order;
+    existing NLA track order is the deterministic allocation tie-breaker.
+    """
 
     values = {
         "timeline_start": timeline_start,
@@ -341,8 +346,11 @@ def place_action_strip(
         "action_start": action_start,
         "action_end": action_end,
     }
-    if any(not isinstance(value, (int, float)) for value in values.values()):
-        raise ValueError("NLA placement frame values must be numeric")
+    if any(
+        not isinstance(value, (int, float)) or not math.isfinite(float(value))
+        for value in values.values()
+    ):
+        raise ValueError("NLA placement frame values must be finite numbers")
     if timeline_duration <= 0:
         raise ValueError("timeline_duration must be positive")
     if action_end <= action_start:
