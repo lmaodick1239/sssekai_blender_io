@@ -82,6 +82,7 @@ def _load_catalog_functions():
     tree = ast.parse(source)
     names = {
         "_timeline_source_key",
+        "_is_timeline_candidate",
         "timeline_track_enum",
         "catalog_timeline_tracks",
         "enumerate_timeline_tracks",
@@ -158,6 +159,61 @@ def test_catalog_does_not_use_external_mvdata_or_arbitrary_groups():
     ])
     assert tracks == []
     assert "mvdata.json" not in (ROOT / "blender/panels/importer.py").read_text()
+
+
+def test_mixed_environment_skips_ordinary_readers_and_preserves_existing_indexes():
+    catalog = _load_catalog_functions()
+    assets_file = object()
+    motion = make_track("Character0", "Motion Group", 10, assets_file)
+
+    ordinary = Reader(object(), 20, assets_file)
+    ordinary.serialized_type = SimpleNamespace(
+        node=SimpleNamespace(
+            traverse=lambda: [SimpleNamespace(m_Name="m_Name")],
+        )
+    )
+    animation = Reader(Animation("existing animation"), 30, assets_file)
+    animation.type = "AnimationClip"
+    animation.serialized_type = ordinary.serialized_type
+    animator = Reader(object(), 40, assets_file)
+    animator.type = "Animator"
+    animator.serialized_type = ordinary.serialized_type
+    environment_objects = [ordinary, motion, animation, animator]
+
+    tracks = catalog["catalog_timeline_tracks"](environment_objects)
+    animation_index = {
+        reader.path_id: reader
+        for reader in environment_objects
+        if getattr(reader, "type", None) == "AnimationClip"
+    }
+    animator_index = {
+        reader.path_id: reader
+        for reader in environment_objects
+        if getattr(reader, "type", None) == "Animator"
+    }
+
+    assert [track.name for track in tracks] == ["Character0"]
+    assert animation_index == {30: animation}
+    assert animator_index == {40: animator}
+
+
+def test_recognized_candidate_keeps_typed_parent_diagnostics():
+    catalog = _load_catalog_functions()
+    unreadable = Reader(object(), 50, object())
+    unreadable.serialized_type = SimpleNamespace(
+        node=SimpleNamespace(
+            traverse=lambda: [SimpleNamespace(m_Name="m_Parent")],
+        )
+    )
+
+    try:
+        catalog["catalog_timeline_tracks"]([unreadable])
+    except TIMELINE.TimelineResolutionError as error:
+        assert error.track_source_id == 50
+        assert error.track_name == ""
+        assert "parent" in str(error)
+    else:
+        raise AssertionError("recognized unreadable candidate did not raise")
 
 
 if __name__ == "__main__":

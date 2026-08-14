@@ -65,3 +65,37 @@ Commit hash: `1331f874195af3734bfd27b25009c504b5c25631`.
 - IDs use Python object identity for the loaded `assets_file`, as requested. They are stable for the lifetime of the loaded environment, but are not intended to persist across a later reload of the same asset bundle.
 - Full Blender UI registration and live UnityPy bundle loading were not executable in this environment. They were covered by static compilation and the direct resolver/catalog harness.
 - Tasks 4-6 were not implemented.
+
+## Task 3 Review Fix
+
+### Status
+
+Fixed the Task 3 review finding and committed the scoped changes.
+
+### Root Cause
+
+`catalog_timeline_tracks()` passed every environment reader to the Timeline resolver. The resolver correctly raises a typed `TimelineResolutionError` when a readable object has no `m_Parent`, but ordinary Unity environment readers are not Timeline tracks and commonly have no parent field.
+
+### Fix
+
+- Added `_is_timeline_candidate()` in `blender/panels/importer.py`.
+- The catalog inspects available UnityPy serialized type-tree metadata and sends only readers whose type tree contains `m_Parent` to the resolver.
+- Readers without usable type-tree metadata remain candidates for compatibility with lightweight readers and existing resolver behavior.
+- Recognized candidates still go through the resolver, preserving typed diagnostics for unreadable tracks and parents.
+- Existing AnimationClip and Animator indexing code was not changed.
+- No access to `xtract/mvdata.json`; Tasks 4-6 remain unimplemented.
+
+### Regression Coverage
+
+Added direct-harness tests for a mixed environment containing ordinary readers, a recognized Motion Group track, an AnimationClip reader, and an Animator reader. The test confirms catalog refresh completes, the track remains discoverable, and existing animation/animator indexing inputs remain present. A second test confirms a candidate with `m_Parent` metadata still raises the resolver's typed parent diagnostic when unreadable.
+
+### Verification
+
+- `.venv/bin/python tests/test_timeline_catalog.py` passed: `task3 catalog tests passed`.
+- `.venv/bin/python -m py_compile blender/panels/importer.py blender/__init__.py tests/test_timeline_catalog.py` passed.
+- `git diff --check` passed.
+- `pytest` runtime and Blender executable remain unavailable, so pytest and live Blender UI checks were not run.
+
+### Fix Commit
+
+Commit hash: `5fd74bb8d0528086a69136c716815859c1844311`.
