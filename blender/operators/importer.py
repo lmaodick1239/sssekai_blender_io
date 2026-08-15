@@ -704,7 +704,7 @@ class SSSekaiBlenderImportSekaiCharacterFaceMotionOperator(bpy.types.Operator):
 class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
     bl_idname = "sssekai.import_sekai_timeline_op"
     bl_label = T("Import Sekai Timeline")
-    bl_description = T("Import selected Timeline motion and explicitly paired face tracks")
+    bl_description = T("Import selected Timeline motion or explicitly selected face tracks")
 
     @staticmethod
     def _body_tos_leaf(body):
@@ -780,9 +780,12 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
             self.report({"ERROR"}, T("Select a motion track for paired Timeline import"))
             return {"CANCELLED"}
 
+        # A face selection is meaningful without motion only as an explicit face-only import.
+        # With motion selected, face data is opt-in through the pairing flag.
+        face_requested = bool(face_id) and (paired or not motion_id)
         try:
             motion = self._track(motion_id, "MOTION")
-            face_track = self._track(face_id, "FACE")
+            face_track = self._track(face_id if face_requested else "", "FACE")
         except ValueError as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
@@ -818,6 +821,7 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
             warnings = []
             target = body if kind == "MOTION" else face_target
             for spec in sorted(track.clips, key=lambda item: item.source_order):
+                clip_label = f"{track.name} / {spec.display_name}"
                 try:
                     frames = timeline_clip_frames(spec, fps)
                     animation = read_animation(spec.animation_reader.read())
@@ -825,18 +829,23 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
                         action = load_armature_animation(
                             spec.display_name, animation, target, body_tos_leaf
                         )
+                        if action_curve_count(action) == 0:
+                            raise ValueError("generated body Action has no curves")
                     else:
                         action = load_sekai_keyshape_animation(
                             spec.display_name, animation, face_crc_table
                         )
                         if action_curve_count(action) == 0:
                             raise ValueError("generated face Action has no curves")
-                    warnings.extend(validate_timeline_clip(spec, action.frame_range, fps))
+                    warnings.extend(
+                        f"{clip_label}: {warning}"
+                        for warning in validate_timeline_clip(spec, action.frame_range, fps)
+                    )
                     prepared.append((track, spec, frames, action, target))
                     imported += 1
                 except Exception as error:
                     skipped += 1
-                    warnings.append(f"{spec.display_name}: {error}")
+                    warnings.append(f"{clip_label}: {error}")
             track_reports.append((track, imported, skipped, warnings))
             if kind == "MOTION":
                 motion_imported, motion_skipped = imported, skipped

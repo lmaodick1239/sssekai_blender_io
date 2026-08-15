@@ -664,7 +664,6 @@ class SSSekaiBlenderImportPanel(bpy.types.Panel):
                 row = layout.row()
                 row.prop(wm, "sssekai_import_matching_face_track")
                 row = layout.row()
-                row.enabled = wm.sssekai_import_matching_face_track
                 row.prop(wm, "sssekai_selected_face_track", text=T("Face Track"))
                 row.operator(get_enum_search_op_name("sssekai_selected_face_track"), icon="VIEWZOOM")
                 row = layout.row()
