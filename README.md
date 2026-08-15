@@ -135,6 +135,9 @@ pip install git+https://github.com/K0lb3/UnityPy.git
 - Particles?
   - Most probably WONTFIX.
 #### Animation
+- Unity Timeline motion and face sequencing is available from the importer panel. Select the active Blender character controller, choose the raw `Motion Group` track, and optionally enable and choose a raw `Face  Group` track for explicit body/face pairing. Use the standalone append control for body-only clips that should start after the existing body endpoint.
+- Timeline import does not require `mvdata.json`, and source track names are not mapped automatically to Blender characters; the active controller is the target.
+- Timeline blend/ease, loop, extrapolation, root matching, and foot-IK semantics are not reproduced. Imports keep finite authored clip ranges and report warnings for those settings.
 - ~~Light animation~~
   - Done. Applies to directional lights, rim lights and ambient lights
   - **XXX:** Implementation shows severe performance regression with animated lights in Blender 4.0+

@@ -37,6 +37,18 @@ def _key_action(name="face-key-action", end_frame=120.0):
     return action
 
 
+def _body_target(name):
+    armature = bpy.data.armatures.new(f"{name}-armature")
+    obj = bpy.data.objects.new(f"{name}-object", armature)
+    bpy.context.scene.collection.objects.link(obj)
+    return armature, obj
+
+
+def _remove_body_target(armature, obj):
+    bpy.data.objects.remove(obj, do_unlink=True)
+    bpy.data.armatures.remove(armature)
+
+
 def _remove_shape_key_target(mesh, obj, key):
     bpy.data.objects.remove(obj, do_unlink=True)
     bpy.data.meshes.remove(mesh)
@@ -126,6 +138,8 @@ def test_place_key_action_strip_uses_explicit_ranges_and_key_slot():
             track_group="Face Group",
             name="explicit-face-strip",
         )
+        assert action.frame_range[0] == 0.0
+        assert action.frame_range[1] == 120.0
         assert strip.frame_start == 12.5
         assert strip.frame_end == 42.75
         assert strip.action_frame_start == 15.0
@@ -135,6 +149,36 @@ def test_place_key_action_strip_uses_explicit_ranges_and_key_slot():
     finally:
         _cleanup_action(action)
         _remove_shape_key_target(mesh, obj, key)
+
+
+def test_place_body_action_strip_uses_object_slot_and_explicit_ranges():
+    armature, obj = _body_target("body-explicit-nla-test")
+    action = create_action("body-explicit-nla-action", "OBJECT")
+    fcurve = create_action_fcurve(action, "OBJECT", 'pose.bones["root"].location', index=0)
+    fcurve.keyframe_points.insert(10.0, 0.0)
+    fcurve.keyframe_points.insert(70.0, 1.0)
+    try:
+        strip = place_action_strip(
+            obj,
+            action,
+            timeline_start=24.5,
+            timeline_duration=30.25,
+            action_start=10.0,
+            action_end=70.0,
+            track_group="Motion Group",
+            name="explicit-body-strip",
+        )
+        assert action.frame_range[0] == 10.0
+        assert action.frame_range[1] == 70.0
+        assert strip.frame_start == 24.5
+        assert strip.frame_end == 54.75
+        assert strip.action_frame_start == 10.0
+        assert strip.action_frame_end == 70.0
+        assert strip.action_slot.target_id_type == "OBJECT"
+        assert strip.influence > 0.0
+    finally:
+        _cleanup_action(action)
+        _remove_body_target(armature, obj)
 
 
 def test_keyshape_loader_uses_key_slot_and_skips_unknown_crc(caplog):
