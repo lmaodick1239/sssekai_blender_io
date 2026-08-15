@@ -99,3 +99,37 @@ Added direct-harness tests for a mixed environment containing ordinary readers, 
 ### Fix Commit
 
 Commit hash: `5fd74bb8d0528086a69136c716815859c1844311`.
+
+## Task 3 Re-review Fix 2
+
+### Status
+
+Fixed the remaining Task 3 re-review finding and committed the scoped changes.
+
+### Root Cause
+
+`_is_timeline_candidate()` treated absent or unusable type-tree metadata as a positive Timeline-candidate signal. That caused ordinary readers with no readable `m_Parent` field to reach `resolve_timeline_tracks()` and potentially abort catalog refresh with `TimelineResolutionError`.
+
+### Fix
+
+- Usable type-tree metadata remains authoritative: only readers whose metadata exposes `m_Parent` are candidates.
+- When metadata is absent, lacks a callable traversal method, or traversal fails, the reader payload is probed safely for `m_Parent`.
+- Unknown readers whose payload cannot be read or lacks `m_Parent` are skipped without aborting catalog refresh.
+- Direct Motion/Face track payloads without metadata still expose `m_Parent`, so they remain discoverable.
+- Recognized candidates with unreadable parent references still reach the resolver and preserve typed diagnostics.
+- Tasks 4-6 and external metadata access remain out of scope.
+
+### Regression Coverage
+
+Added a direct regression with mixed ordinary readers: one with missing metadata, one with unusable metadata, and recognized direct Motion and Face tracks. The test confirms ordinary readers are skipped while both recognized tracks remain cataloged. Existing typed-parent diagnostic coverage remains unchanged and passing.
+
+### Verification
+
+- `.venv/bin/python tests/test_timeline_catalog.py` passed: `task3 catalog tests passed`.
+- `.venv/bin/python -m py_compile blender/panels/importer.py blender/__init__.py tests/test_timeline_catalog.py` passed.
+- `git diff --check` passed.
+- Pytest and Blender remain unavailable, so pytest collection and live Blender checks were not run.
+
+### Commit
+
+Code and regression commit hash: `e51c65adef0879bab41ded37a1b57498c286769a`.
