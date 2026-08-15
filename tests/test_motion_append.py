@@ -357,9 +357,11 @@ def test_blender_registration_and_panel_draw_when_available():
             sssekai_selected_animation="0",
             sssekai_selected_animator_container="0",
             sssekai_selected_animator="0",
+            sssekai_animation_import_use_scene_fps=False,
             sssekai_animation_append_exisiting=False,
             sssekai_animation_import_use_nla=True,
             sssekai_animation_import_nla_always_new_track=True,
+            sssekai_animation_import_mode="SEKAI_MOTION",
         )
         instance = panel_class()
         instance.layout = _Layout()

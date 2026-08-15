@@ -117,5 +117,23 @@ Unavailable:
 
 ### Remaining Concerns
 
-- Blender registration and panel draw behavior remain runtime-unverified in this environment.
+- Blender registration and panel draw behavior remain runtime-unverified in this environment; the guarded positive-path double now supplies every Window Manager property and layout method read by the standalone Animation branch.
 - Production Blender NLA behavior remains outside this test-only follow-up and was not changed.
+
+## Task 5 Second Re-review Fix
+
+### Status
+
+Resolved the remaining Task 5 re-review finding without changing production code or implementing Task 6.
+
+### Fix
+
+- Updated the guarded Blender panel draw test's Window Manager double with `sssekai_animation_import_use_scene_fps=False` and the supported standalone Animation mode `sssekai_animation_import_mode="SEKAI_MOTION"`.
+- The existing layout double already implements all UI methods read by the standalone Animation branch: `row()`, `label()`, `prop()`, and `operator()`.
+- The `pytest.importorskip("bpy")` fallback remains unchanged, so dependency-free environments continue to skip the Blender-positive path cleanly.
+
+### Verification
+
+- Dependency-free runner, `py_compile`, AST, and `git diff --check` were run for this scoped follow-up.
+- Pytest and Blender remain unavailable in the current environment.
+- Only `tests/test_motion_append.py` and this report were changed; `xtract/mvdata.json` was not accessed.
