@@ -342,10 +342,10 @@ def test_blender_registration_and_panel_draw_when_available():
             def label(self, **kwargs):
                 return None
 
-            def prop(self, **kwargs):
+            def prop(self, *args, **kwargs):
                 return None
 
-            def operator(self, **kwargs):
+            def operator(self, *args, **kwargs):
                 return None
 
         wm = SimpleNamespace(

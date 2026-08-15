@@ -137,3 +137,32 @@ Resolved the remaining Task 5 re-review finding without changing production code
 - Dependency-free runner, `py_compile`, AST, and `git diff --check` were run for this scoped follow-up.
 - Pytest and Blender remain unavailable in the current environment.
 - Only `tests/test_motion_append.py` and this report were changed; `xtract/mvdata.json` was not accessed.
+
+## Task 5 Final Re-review Fix
+
+### Status
+
+Resolved the remaining Task 5 guarded-runtime test finding without changing production code or implementing Task 6.
+
+### Fix
+
+- Updated the guarded Blender panel draw test's `_Layout.prop()` and `_Layout.operator()` doubles to accept both positional and keyword arguments, matching Blender panel draw calls while preserving the no-op UI behavior.
+- The guarded registration, panel draw, and unregister path remains intact, and the `bpy`-unavailable fallback remains unchanged.
+
+### Verification
+
+Passed:
+
+- Dependency-free direct runner: 9 tests passed.
+- `/usr/bin/python3 -m py_compile tests/test_motion_append.py`.
+- Direct AST parsing of `tests/test_motion_append.py`.
+- `git diff --check` for the scoped test/report files.
+
+Unavailable:
+
+- Focused pytest: collection aborts because the available environment lacks the required `UnityPy` dependency.
+- Blender runtime check, because `bpy` is unavailable.
+
+### Scope
+
+Only `tests/test_motion_append.py` and this report were changed. `xtract/mvdata.json` was not accessed, no production file was modified, and no Task 6 implementation was added.
