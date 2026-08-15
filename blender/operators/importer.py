@@ -24,6 +24,8 @@ from ..core.helpers import (
     editbone_children_recursive,
     armature_editbone_children_recursive,
     set_obj_bone_parent,
+    place_action_strip,
+    append_start_frame,
 )
 
 from ..core.asset import (
@@ -50,6 +52,7 @@ from ..core.animation import (
 from ..core.types import Hierarchy
 from ..core.math import blVector, blEuler, blMatrix, xform_to_matrix
 from ..core.helpers import apply_pose_matrix
+from ..core.timeline import timeline_clip_frames, validate_timeline_clip
 from .. import register_class, register_wm_props, logger
 from .. import sssekai_global
 from ..operators.material import (
@@ -694,6 +697,181 @@ class SSSekaiBlenderImportSekaiCharacterFaceMotionOperator(bpy.types.Operator):
         self.report({"INFO"}, T("Sekai Shapekey Animation %s Imported") % anim.Name)
         bpy.context.view_layer.objects.active = active_obj
         bpy.ops.object.mode_set(mode="OBJECT")
+        return {"FINISHED"}
+
+
+@register_class
+class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
+    bl_idname = "sssekai.import_sekai_timeline_op"
+    bl_label = T("Import Sekai Timeline")
+    bl_description = T("Import selected Timeline motion and explicitly paired face tracks")
+
+    @staticmethod
+    def _body_tos_leaf(body):
+        def visit(bone, parent_path=""):
+            unity_name = bone.get(KEY_HIERARCHY_BONE_NAME, bone.name)
+            path = f"{parent_path}/{unity_name}" if parent_path else unity_name
+            yield crc32(path), bone.name
+            for child in bone.children:
+                yield from visit(child, path)
+
+        result = dict(
+            item
+            for root in body.data.bones
+            if root.parent is None
+            for item in visit(root)
+        )
+        result[0] = next(
+            (bone.name for bone in body.data.bones if bone.parent is None),
+            "",
+        )
+        return result
+
+    @staticmethod
+    def _face_target(face):
+        morphs = [
+            obj
+            for obj in face.children_recursive
+            if obj.type == "MESH" and KEY_SHAPEKEY_HASH_TABEL in obj.data
+        ]
+        if len(morphs) != 1:
+            raise ValueError("expected exactly one face mesh with a shapekey hash table")
+        morph = morphs[0]
+        return morph.data.shape_keys, json.loads(morph.data[KEY_SHAPEKEY_HASH_TABEL])
+
+    @staticmethod
+    def _track(track_id, expected_kind):
+        from ..panels.importer import timeline_track_by_id
+
+        if not track_id or track_id == "<no assest selected!>":
+            return None
+        track = timeline_track_by_id(track_id)
+        if track is None or track.kind != expected_kind:
+            raise ValueError(f"selected {expected_kind.lower()} Timeline track is unavailable")
+        return track
+
+    def _report_track(self, track, imported, skipped, warnings):
+        detail = f"{track.name}: imported={imported}, skipped={skipped}"
+        if warnings:
+            detail += "; warnings=" + " | ".join(warnings)
+        self.report({"WARNING" if skipped or warnings else "INFO"}, detail)
+
+    def execute(self, context):
+        wm = context.window_manager
+        controller = context.active_object
+        if not controller or KEY_SEKAI_CHARACTER_ROOT not in controller:
+            self.report({"ERROR"}, T("Active object must be a Sekai character controller"))
+            return {"CANCELLED"}
+
+        motion_id = wm.sssekai_selected_motion_track
+        face_id = wm.sssekai_selected_face_track
+        if motion_id == "<no assest selected!>":
+            motion_id = ""
+        if face_id == "<no assest selected!>":
+            face_id = ""
+        paired = wm.sssekai_import_matching_face_track
+        if not motion_id and not face_id:
+            self.report({"ERROR"}, T("Select a Timeline motion or face track"))
+            return {"CANCELLED"}
+        if paired and not face_id:
+            self.report({"ERROR"}, T("Select an explicit face track for pairing"))
+            return {"CANCELLED"}
+        if paired and not motion_id:
+            self.report({"ERROR"}, T("Select a motion track for paired Timeline import"))
+            return {"CANCELLED"}
+
+        try:
+            motion = self._track(motion_id, "MOTION")
+            face_track = self._track(face_id, "FACE")
+        except ValueError as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+
+        body = controller.get(KEY_SEKAI_CHARACTER_BODY_OBJ)
+        face = controller.get(KEY_SEKAI_CHARACTER_FACE_OBJ)
+        if motion and not body:
+            self.report({"ERROR"}, T("The active controller has no body target"))
+            return {"CANCELLED"}
+        if face_track and not face:
+            self.report({"ERROR"}, T("The active controller has no face target"))
+            return {"CANCELLED"}
+
+        fps = context.scene.render.fps
+        try:
+            face_target, face_crc_table = self._face_target(face) if face_track else (None, None)
+            body_tos_leaf = self._body_tos_leaf(body) if motion else None
+        except Exception as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        offset = max(
+            append_start_frame(body) if body else 0.0,
+            append_start_frame(face_target) if face_target else 0.0,
+        )
+        prepared = []
+        motion_imported = motion_skipped = 0
+        track_reports = []
+
+        for track, kind in ((motion, "MOTION"), (face_track, "FACE")):
+            if not track:
+                continue
+            imported = skipped = 0
+            warnings = []
+            target = body if kind == "MOTION" else face_target
+            for spec in sorted(track.clips, key=lambda item: item.source_order):
+                try:
+                    frames = timeline_clip_frames(spec, fps)
+                    animation = read_animation(spec.animation_reader.read())
+                    if kind == "MOTION":
+                        action = load_armature_animation(
+                            spec.display_name, animation, target, body_tos_leaf
+                        )
+                    else:
+                        action = load_sekai_keyshape_animation(
+                            spec.display_name, animation, face_crc_table
+                        )
+                        if action_curve_count(action) == 0:
+                            raise ValueError("generated face Action has no curves")
+                    warnings.extend(validate_timeline_clip(spec, action.frame_range, fps))
+                    prepared.append((track, spec, frames, action, target))
+                    imported += 1
+                except Exception as error:
+                    skipped += 1
+                    warnings.append(f"{spec.display_name}: {error}")
+            track_reports.append((track, imported, skipped, warnings))
+            if kind == "MOTION":
+                motion_imported, motion_skipped = imported, skipped
+
+        for track, imported, skipped, warnings in track_reports:
+            self._report_track(track, imported, skipped, warnings)
+        if motion and motion_imported == 0:
+            self.report({"ERROR"}, T("No valid motion clips remain"))
+            return {"CANCELLED"}
+        if not prepared:
+            self.report({"ERROR"}, T("No valid Timeline clips remain"))
+            return {"CANCELLED"}
+
+        largest_end = context.scene.frame_end
+        for track, spec, frames, action, target in sorted(
+            prepared, key=lambda item: (item[2].timeline_start, item[1].source_order)
+        ):
+            strip = place_action_strip(
+                target,
+                action,
+                offset + frames.timeline_start,
+                frames.timeline_end - frames.timeline_start,
+                frames.action_start,
+                frames.action_end,
+                track.name,
+                name=spec.display_name,
+            )
+            largest_end = max(largest_end, strip.frame_end)
+        context.scene.frame_end = int(math.ceil(largest_end))
+        if context.scene.rigidbody_world:
+            context.scene.rigidbody_world.point_cache.frame_end = max(
+                context.scene.rigidbody_world.point_cache.frame_end,
+                context.scene.frame_end,
+            )
+        self.report({"INFO"}, T("Sekai Timeline imported"))
         return {"FINISHED"}
 
 

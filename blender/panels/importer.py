@@ -34,6 +34,7 @@ from ..operators.importer import (
     SSSekaiBlenderImportHierarchyOperator,
     SSSekaiBlenderImportHierarchyAnimationOperaotr,
     SSSekaiBlenderImportSekaiCameraAnimationOperator,
+    SSSekaiBlenderImportSekaiTimelineOperator,
     SSSekaiBlenderCreateCharacterControllerOperator,
     SSSekaiBlenderImportSekaiCharacterMotionOperator,
     SSSekaiBlenderImportSekaiCharacterFaceMotionOperator,
@@ -295,6 +296,11 @@ register_serachable_enum(
     items=enumerate_prop("sssekai_selected_animator_container", "animators"),
 )
 register_wm_props(
+    sssekai_import_matching_face_track=BoolProperty(
+        name=T("Import Explicit Face Track"),
+        description=T("Pair only with the explicitly selected face track; no name or source mapping is used"),
+        default=False,
+    ),
     sssekai_selected_assetbundle_file=StringProperty(
         name=T("Directory"),
         description=T(
@@ -367,6 +373,13 @@ register_wm_props(
                 T("Import the selected animation"),
                 "ANIM_DATA",
                 2,
+            ),
+            (
+                "IMPORT_TIMELINE",
+                T("Timeline"),
+                T("Import explicit Unity Timeline motion and optional face tracks onto the active character controller"),
+                "SEQUENCE",
+                3,
             ),
         ],
     ),
@@ -643,6 +656,18 @@ class SSSekaiBlenderImportPanel(bpy.types.Panel):
         row = layout.row()
         import_type = wm.sssekai_import_type
         match import_type:
+            case "IMPORT_TIMELINE":
+                row.label(text=T("Timeline labels; active character controller is the Blender target"), icon="INFO")
+                row = layout.row()
+                row.prop(wm, "sssekai_selected_motion_track", text=T("Motion Track"))
+                row.operator(get_enum_search_op_name("sssekai_selected_motion_track"), icon="VIEWZOOM")
+                row = layout.row()
+                row.prop(wm, "sssekai_import_matching_face_track")
+                row = layout.row()
+                row.enabled = wm.sssekai_import_matching_face_track
+                row.prop(wm, "sssekai_selected_face_track", text=T("Face Track"))
+                row.operator(get_enum_search_op_name("sssekai_selected_face_track"), icon="VIEWZOOM")
+                row = layout.row()
             case "IMPORT_ANIMATION":
                 row.prop(
                     wm,
@@ -699,6 +724,14 @@ class SSSekaiBlenderImportPanel(bpy.types.Panel):
         row.label(text=T("Import Options"), icon="OPTIONS")
         row = layout.row()
         match import_type:
+            case "IMPORT_TIMELINE":
+                if active_obj and KEY_SEKAI_CHARACTER_ROOT in active_obj:
+                    row.label(text=T("Tracks are paired explicitly; no source character mapping is used"), icon="INFO")
+                    row = layout.row()
+                    row.operator(SSSekaiBlenderImportSekaiTimelineOperator.bl_idname, icon="APPEND_BLEND")
+                else:
+                    row.label(text=T("Please select a SekaiCharacterRoot controller first"))
+                row = layout.row()
             case "IMPORT_ANIMATION":
                 row.label(text=T("Animation Options"), icon="ANIM_DATA")
                 row = layout.row()
