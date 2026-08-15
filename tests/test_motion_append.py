@@ -119,6 +119,37 @@ class _Object(dict):
         ) if ends else None
 
 
+class _Controller(_Object):
+    def __init__(self):
+        super().__init__()
+        self.lookups = []
+
+    def get(self, key, default=None):
+        self.lookups.append(key)
+        return super().get(key, default)
+
+
+class _FaceTarget(_Object):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.observations = []
+        self.shape_keys = {"smile": 0.25}
+
+    def __getattribute__(self, name):
+        if name in {"animation_data", "shape_keys", "parent"}:
+            observations = object.__getattribute__(self, "__dict__").get("observations")
+            if observations is not None:
+                observations.append(("read", name))
+        return super().__getattribute__(name)
+
+    def __setattr__(self, name, value):
+        if name in {"animation_data", "shape_keys", "parent"}:
+            observations = self.__dict__.get("observations")
+            if observations is not None:
+                observations.append(("write", name, value))
+        super().__setattr__(name, value)
+
+
 class _Container:
     animations = [_Animation()]
 
@@ -173,11 +204,13 @@ def _load_operator_class():
 def _operator_flow(append=True, body_ends=(120.0, 240.0), face_end=480.0):
     operator, scope = _load_operator_class()
     body = _Object(ends=body_ends)
-    face = _Object(ends=(face_end,))
-    controller = _Object()
+    face = _FaceTarget(ends=(face_end,))
+    controller = _Controller()
     controller["body"] = body
+    controller["face"] = face
     body.parent = controller
-    face_state = {"shape_keys": "unchanged", "nla": tuple(face.animation_data.nla_tracks[0].strips)}
+    face_state = {"shape_keys": dict(face.shape_keys), "nla": tuple(face.animation_data.nla_tracks[0].strips)}
+    face.observations.clear()
     placements = []
     applied = []
 
@@ -219,7 +252,9 @@ def _operator_flow(append=True, body_ends=(120.0, 240.0), face_end=480.0):
     reports = []
     op.report = lambda level, message: reports.append((level, message))
     result = op.execute(context)
-    assert face_state == {"shape_keys": "unchanged", "nla": tuple(face.animation_data.nla_tracks[0].strips)}
+    assert controller.lookups == (["body"] if append else [])
+    assert face.observations == []
+    assert face_state == {"shape_keys": dict(face.shape_keys), "nla": tuple(face.animation_data.nla_tracks[0].strips)}
     return result, body, face, scene, placements, applied, reports
 
 
@@ -265,8 +300,24 @@ def test_append_branch_is_task5_specific_and_has_no_task6_collision_assertion():
     source = ast.unparse(operator)
     assert "append_start_frame(active_obj)" in source
     assert "imported_end = strip.frame_end" in source
-    assert "action_start, action_end = action.frame_range" in source
+    frame_range_assignments = [
+        node
+        for node in ast.walk(operator)
+        if isinstance(node, ast.Assign)
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "frame_range"
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Tuple)
+        and [elt.id for elt in node.targets[0].elts if isinstance(elt, ast.Name)] == [
+            "action_start", "action_end"
+        ]
+    ]
+    assert frame_range_assignments
     assert "largest_end" not in source
+
+
+def test_append_branch_never_reads_or_mutates_face_target():
+    _operator_flow(body_ends=(240.0,), face_end=999.0)
 
 
 def test_append_property_is_exposed_by_import_panel_with_legacy_spelling():
@@ -275,12 +326,47 @@ def test_append_property_is_exposed_by_import_panel_with_legacy_spelling():
 
 
 def test_blender_registration_and_panel_draw_when_available():
-    pytest.importorskip("bpy")
+    bpy = pytest.importorskip("bpy")
     panel = importlib.import_module("sssekai_blender_io.blender.panels.importer")
     operators = importlib.import_module("sssekai_blender_io.blender.operators.importer")
-    assert hasattr(operators, "SSSekaiBlenderImportHierarchyAnimationOperaotr")
-    assert hasattr(panel, "SSSekaiBlenderImportPanel")
-    assert hasattr(panel.SSSekaiBlenderImportPanel, "draw")
+    panel_class = panel.SSSekaiBlenderImportPanel
+    operator_class = operators.SSSekaiBlenderImportHierarchyAnimationOperaotr
+
+    bpy.utils.register_class(panel_class)
+    bpy.utils.register_class(operator_class)
+    try:
+        class _Layout:
+            def row(self):
+                return self
+
+            def label(self, **kwargs):
+                return None
+
+            def prop(self, **kwargs):
+                return None
+
+            def operator(self, **kwargs):
+                return None
+
+        wm = SimpleNamespace(
+            sssekai_import_type="IMPORT_ANIMATION",
+            sssekai_unity_version_override="",
+            sssekai_selected_assetbundle_file="",
+            sssekai_selected_assetbundle_file_aux="",
+            sssekai_selected_animation_container="0",
+            sssekai_selected_animation="0",
+            sssekai_selected_animator_container="0",
+            sssekai_selected_animator="0",
+            sssekai_animation_append_exisiting=False,
+            sssekai_animation_import_use_nla=True,
+            sssekai_animation_import_nla_always_new_track=True,
+        )
+        instance = panel_class()
+        instance.layout = _Layout()
+        instance.draw(SimpleNamespace(window_manager=wm, active_object=None))
+    finally:
+        bpy.utils.unregister_class(operator_class)
+        bpy.utils.unregister_class(panel_class)
 
 
 def test_non_append_legacy_apply_path_remains_present():

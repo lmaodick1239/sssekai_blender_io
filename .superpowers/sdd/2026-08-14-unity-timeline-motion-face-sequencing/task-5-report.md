@@ -88,3 +88,34 @@ Unavailable:
 ### Scope
 
 Only `tests/test_motion_append.py` and this report were changed. `xtract/mvdata.json` was not accessed, and no Task 6 implementation was added.
+
+## Task 5 Re-review Follow-up
+
+### Status
+
+Resolved the remaining Task 5 test re-review findings without changing production code or implementing Task 6.
+
+### Fixes
+
+- Replaced the brittle `ast.unparse()` text match for the action frame-range assignment with an AST-structure assertion that accepts the dependency-free parser's normalized representation and remains scoped to the Task 5 operator.
+- Connected a face target double to the controller fixture, recorded controller property lookups and face property reads/writes, and asserted that append execution only looks up the body target and leaves the face target unobserved and unchanged.
+- Strengthened the guarded Blender check to call `bpy.utils.register_class()` for the panel and operator, instantiate the panel, execute `draw()` with a layout/context double, and unregister both classes in cleanup. The `bpy`-unavailable path remains guarded by `pytest.importorskip()`.
+
+### Verification
+
+Passed:
+
+- Dependency-free direct runner: 9 tests passed.
+- `/usr/bin/python3 -m py_compile tests/test_motion_append.py`.
+- Direct AST parsing of `tests/test_motion_append.py`.
+- `git diff --check` for the scoped test/report files.
+
+Unavailable:
+
+- Focused pytest, because the available environment lacks the required pytest runner/dependencies.
+- Blender runtime check, because `bpy` is unavailable; the guarded registration and panel draw path is exercised when a real Blender runtime is present.
+
+### Remaining Concerns
+
+- Blender registration and panel draw behavior remain runtime-unverified in this environment.
+- Production Blender NLA behavior remains outside this test-only follow-up and was not changed.
