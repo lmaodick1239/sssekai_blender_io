@@ -738,6 +738,8 @@ class SSSekaiBlenderImportPanel(bpy.types.Panel):
                 if wm.sssekai_animation_import_use_scene_fps:
                     row.prop(bpy.context.scene.render, "fps", text=T("Scene FPS"))
                 row = layout.row()
+                row.prop(wm, "sssekai_animation_append_exisiting", icon="APPEND_BLEND")
+                row = layout.row()
                 row.prop(wm, "sssekai_animation_import_use_nla", icon="NLA")
                 row.prop(
                     wm, "sssekai_animation_import_nla_always_new_track", icon="NLA"

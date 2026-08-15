@@ -589,21 +589,42 @@ class SSSekaiBlenderImportHierarchyAnimationOperaotr(bpy.types.Operator):
             active_obj,
             tos_leaf,
         )
-        # Set frame range
+        append_body = (
+            getattr(wm, "sssekai_animation_append_exisiting", False)
+            and active_obj.parent
+            and active_obj.parent.get(KEY_SEKAI_CHARACTER_BODY_OBJ) is active_obj
+        )
+        if append_body:
+            append_start = append_start_frame(active_obj)
+            action_start, action_end = action.frame_range
+            strip = place_action_strip(
+                active_obj,
+                action,
+                append_start,
+                action_end - action_start,
+                action_start,
+                action_end,
+                "Motion Group",
+                name=action.name,
+            )
+            imported_end = strip.frame_end
+        else:
+            imported_end = action.curve_frame_range[1]
+            apply_action(
+                active_obj,
+                action,
+                wm.sssekai_animation_import_use_nla,
+                wm.sssekai_animation_import_nla_always_new_track,
+            )
+        # Set frame range, including the actual endpoint of an appended strip.
         bpy.context.scene.frame_end = max(
-            bpy.context.scene.frame_end, int(action.curve_frame_range[1])
+            bpy.context.scene.frame_end, int(imported_end)
         )
         if bpy.context.scene.rigidbody_world:
             bpy.context.scene.rigidbody_world.point_cache.frame_end = max(
                 bpy.context.scene.rigidbody_world.point_cache.frame_end,
                 bpy.context.scene.frame_end,
             )
-        apply_action(
-            active_obj,
-            action,
-            wm.sssekai_animation_import_use_nla,
-            wm.sssekai_animation_import_nla_always_new_track,
-        )
         self.report({"INFO"}, T("Hierarchy Animation %s Imported") % anim.Name)
         # Restore
         bpy.context.view_layer.objects.active = active_obj
