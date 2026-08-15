@@ -57,3 +57,34 @@ Not run:
 - Blender NLA runtime behavior and Blender 5 Action-slot compatibility remain unverified without Blender.
 - The append property name remains the historical typo `exisiting` by design for compatibility.
 - The working tree contained unrelated pre-existing changes; they were not modified or staged.
+
+## Task 5 Review Fix
+
+### Status
+
+Resolved the Task 5 test-quality findings without changing production behavior or implementing Task 6.
+
+### Test Fixes
+
+- Replaced the source assertion that could match Task 6 with a Task-5-class-scoped AST assertion and an executable fake flow that invokes `SSSekaiBlenderImportHierarchyAnimationOperaotr.execute()`.
+- Added executable doubles covering body-only append endpoint selection despite a later face endpoint, zero-body-strip placement, complete `action.frame_range`, explicit action frame bounds, strip endpoint, scene and rigidbody extension, unchanged face state, and the unchanged non-append `apply_action()` path.
+- Added a guarded Blender import/registration/panel reachability test; the direct/static tests remain usable when Blender is unavailable.
+
+### Verification
+
+Passed:
+
+- Direct execution of all non-Blender tests in `tests/test_motion_append.py` using a dependency-free runner: 8 passed.
+- Guarded Blender test: skipped because `bpy` is unavailable.
+- `/usr/bin/python3 -m py_compile tests/test_motion_append.py`.
+- Direct AST parsing of `tests/test_motion_append.py`.
+- `git diff --check`.
+
+Unavailable:
+
+- Focused pytest: `.venv/bin/python` has no `pytest`, and the default shell has no `python` executable.
+- Blender runtime and `bpy` registration/panel execution.
+
+### Scope
+
+Only `tests/test_motion_append.py` and this report were changed. `xtract/mvdata.json` was not accessed, and no Task 6 implementation was added.

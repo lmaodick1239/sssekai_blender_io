@@ -1,13 +1,18 @@
 """Task 5 guarded tests for standalone body motion append behavior."""
 
 import ast
+import importlib
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-IMPORTER_SOURCE = (ROOT / "blender/operators/importer.py").read_text()
-PANEL_SOURCE = (ROOT / "blender/panels/importer.py").read_text()
+IMPORTER_PATH = ROOT / "blender/operators/importer.py"
+PANEL_PATH = ROOT / "blender/panels/importer.py"
+IMPORTER_SOURCE = IMPORTER_PATH.read_text(encoding="utf-8")
+PANEL_SOURCE = PANEL_PATH.read_text(encoding="utf-8")
 
 
 def _load_helpers():
@@ -86,31 +91,196 @@ def test_append_empty_body_starts_at_zero():
     assert helpers.append_start_frame(_Target()) == 0.0
 
 
-def test_standalone_body_append_places_full_action_without_clip_in():
+class _Animation:
+    Name = "body-animation"
+    m_Name = "body-animation"
+    SampleRate = 30
+
+    def read(self):
+        return self
+
+
+class _Action:
+    name = "body-action"
+    frame_range = (10.0, 70.0)
+    curve_frame_range = (10.0, 70.0)
+
+
+class _Object(dict):
+    type = "ARMATURE"
+
+    def __init__(self, parent=None, ends=()):
+        super().__init__()
+        self["hierarchy_pathid"] = True
+        self.parent = parent
+        self.data = SimpleNamespace(edit_bones=[SimpleNamespace(name="root")])
+        self.animation_data = SimpleNamespace(
+            nla_tracks=[SimpleNamespace(strips=[SimpleNamespace(frame_end=end) for end in ends])]
+        ) if ends else None
+
+
+class _Container:
+    animations = [_Animation()]
+
+
+def _load_operator_class():
+    """Load only the Task 5 operator class, avoiding Blender and UnityPy imports."""
     tree = ast.parse(IMPORTER_SOURCE)
-    assert "sssekai_animation_append_exisiting" in IMPORTER_SOURCE
-    assert "place_action_strip" in IMPORTER_SOURCE
-    assert "append_start_frame" in IMPORTER_SOURCE
-    assert "action_start, action_end = action.frame_range" in IMPORTER_SOURCE
-    assert "action_start,\n                action_end," in IMPORTER_SOURCE
-    assert any(
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "place_action_strip"
-        for node in ast.walk(tree)
+    class_node = next(
+        node for node in tree.body
+        if isinstance(node, ast.ClassDef)
+        and node.name == "SSSekaiBlenderImportHierarchyAnimationOperaotr"
     )
+    module = ModuleType("task5_operator_under_test")
+    bpy = SimpleNamespace(
+        types=SimpleNamespace(Operator=object),
+        context=None,
+        ops=SimpleNamespace(object=SimpleNamespace(mode_set=lambda **kwargs: None)),
+    )
+    constants = {
+        "KEY_HIERARCHY_BONE_PATHID": "hierarchy_pathid",
+        "KEY_HIERARCHY_BONE_ROOT": "hierarchy_root",
+        "KEY_HIERARCHY_BONE_NAME": "unity_name",
+        "KEY_SEKAI_CHARACTER_BODY_OBJ": "body",
+        "UNITY_MECANIM_RESERVED_TOS": {},
+    }
+    globals_for_class = {
+        "bpy": bpy,
+        "T": lambda value: value,
+        "register_class": lambda value: value,
+        "ensure_sssekai_shader_blend": lambda: None,
+        "armature_editbone_children_recursive": lambda data: [],
+        "editbone_children_recursive": lambda bone: [],
+        "apply_pose_matrix": lambda *args: None,
+        "read_animation": lambda animation: animation,
+        "load_armature_animation": lambda *args: _Action(),
+        "append_start_frame": lambda target: max(
+            (strip.frame_end for track in (target.animation_data.nla_tracks if target.animation_data else [])
+             for strip in track.strips), default=0.0
+        ),
+        "place_action_strip": None,
+        "apply_action": None,
+        "crc32": lambda value: value,
+        "logger": SimpleNamespace(info=lambda *args: None),
+        "sssekai_global": SimpleNamespace(containers={"0": _Container()}),
+        **constants,
+    }
+    exec(compile(ast.Module(body=[class_node], type_ignores=[]), str(IMPORTER_PATH), "exec"), globals_for_class, module.__dict__)
+    module.__dict__.update(globals_for_class)
+    return module.SSSekaiBlenderImportHierarchyAnimationOperaotr, globals_for_class
 
 
-def test_append_extends_scene_from_appended_strip_and_does_not_touch_face():
-    assert "largest_end =" in IMPORTER_SOURCE
-    assert "strip.frame_end" in IMPORTER_SOURCE
-    assert "rigidbody_world.point_cache.frame_end" in IMPORTER_SOURCE
-    assert "face.data.shape_keys" not in IMPORTER_SOURCE
+def _operator_flow(append=True, body_ends=(120.0, 240.0), face_end=480.0):
+    operator, scope = _load_operator_class()
+    body = _Object(ends=body_ends)
+    face = _Object(ends=(face_end,))
+    controller = _Object()
+    controller["body"] = body
+    body.parent = controller
+    face_state = {"shape_keys": "unchanged", "nla": tuple(face.animation_data.nla_tracks[0].strips)}
+    placements = []
+    applied = []
+
+    def place(target, action, start, duration, action_start, action_end, group, name=None):
+        strip = SimpleNamespace(
+            target=target, frame_start=start, frame_end=start + duration,
+            action_frame_start=action_start, action_frame_end=action_end,
+            group=group, name=name,
+        )
+        placements.append(strip)
+        return strip
+
+    def apply(target, action, use_nla, always_new):
+        applied.append((target, action, use_nla, always_new))
+
+    scope["place_action_strip"] = place
+    scope["apply_action"] = apply
+    scene = SimpleNamespace(
+        render=SimpleNamespace(fps=24), frame_end=100,
+        rigidbody_world=SimpleNamespace(point_cache=SimpleNamespace(frame_end=110)),
+    )
+    scope["bpy"].context = SimpleNamespace(
+        scene=scene, view_layer=SimpleNamespace(objects=SimpleNamespace(active=None))
+    )
+    wm = SimpleNamespace(
+        sssekai_animation_use_animator=False,
+        sssekai_animation_root_bone="",
+        sssekai_selected_animator_container="0",
+        sssekai_selected_animator="0",
+        sssekai_selected_animation_container="0",
+        sssekai_selected_animation="0",
+        sssekai_animation_import_use_scene_fps=True,
+        sssekai_animation_import_use_nla=True,
+        sssekai_animation_import_nla_always_new_track=True,
+        sssekai_animation_append_exisiting=append,
+    )
+    context = SimpleNamespace(window_manager=wm, active_object=body, scene=scene)
+    op = operator()
+    reports = []
+    op.report = lambda level, message: reports.append((level, message))
+    result = op.execute(context)
+    assert face_state == {"shape_keys": "unchanged", "nla": tuple(face.animation_data.nla_tracks[0].strips)}
+    return result, body, face, scene, placements, applied, reports
+
+
+def test_standalone_body_append_executes_full_action_at_body_endpoint():
+    result, body, face, scene, placements, applied, reports = _operator_flow()
+    assert result == {"FINISHED"}
+    assert len(placements) == 1
+    strip = placements[0]
+    assert strip.target is body
+    assert strip.frame_start == 240.0
+    assert strip.frame_end == 300.0
+    assert strip.action_frame_start == 10.0
+    assert strip.action_frame_end == 70.0
+    assert not applied
+    assert scene.frame_end == 300
+    assert scene.rigidbody_world.point_cache.frame_end == 300
+
+
+def test_standalone_body_append_uses_zero_for_empty_body_and_ignores_face_endpoint():
+    result, body, face, scene, placements, applied, reports = _operator_flow(
+        body_ends=(), face_end=999.0
+    )
+    assert result == {"FINISHED"}
+    assert placements[0].frame_start == 0.0
+    assert placements[0].frame_end == 60.0
+    assert placements[0].target is not face
+
+
+def test_standalone_body_import_keeps_non_append_apply_path():
+    result, body, face, scene, placements, applied, reports = _operator_flow(append=False)
+    assert result == {"FINISHED"}
+    assert not placements
+    assert len(applied) == 1
+    assert applied[0][0] is body
+    assert applied[0][2:] == (True, True)
+    assert scene.frame_end == 100
+    assert scene.rigidbody_world.point_cache.frame_end == 110
+
+
+def test_append_branch_is_task5_specific_and_has_no_task6_collision_assertion():
+    tree = ast.parse(IMPORTER_SOURCE)
+    operator = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "SSSekaiBlenderImportHierarchyAnimationOperaotr")
+    source = ast.unparse(operator)
+    assert "append_start_frame(active_obj)" in source
+    assert "imported_end = strip.frame_end" in source
+    assert "action_start, action_end = action.frame_range" in source
+    assert "largest_end" not in source
 
 
 def test_append_property_is_exposed_by_import_panel_with_legacy_spelling():
     assert "sssekai_animation_append_exisiting=BoolProperty" in PANEL_SOURCE
     assert 'row.prop(wm, "sssekai_animation_append_exisiting"' in PANEL_SOURCE
+
+
+def test_blender_registration_and_panel_draw_when_available():
+    pytest.importorskip("bpy")
+    panel = importlib.import_module("sssekai_blender_io.blender.panels.importer")
+    operators = importlib.import_module("sssekai_blender_io.blender.operators.importer")
+    assert hasattr(operators, "SSSekaiBlenderImportHierarchyAnimationOperaotr")
+    assert hasattr(panel, "SSSekaiBlenderImportPanel")
+    assert hasattr(panel.SSSekaiBlenderImportPanel, "draw")
 
 
 def test_non_append_legacy_apply_path_remains_present():
