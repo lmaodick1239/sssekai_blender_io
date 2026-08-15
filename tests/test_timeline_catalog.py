@@ -197,6 +197,25 @@ def test_mixed_environment_skips_ordinary_readers_and_preserves_existing_indexes
     assert animator_index == {40: animator}
 
 
+def test_missing_or_unusable_metadata_skips_ordinary_readers_and_keeps_direct_tracks():
+    catalog = _load_catalog_functions()
+    assets_file = object()
+    motion = make_track("Character0", "Motion Group", 10, assets_file)
+    face = make_track("Character0_face", "Face  Group", 11, assets_file)
+
+    missing_metadata = Reader(object(), 20, assets_file)
+    unusable_metadata = Reader(object(), 21, assets_file)
+    unusable_metadata.serialized_type = SimpleNamespace(
+        node=SimpleNamespace(traverse=lambda: (_ for _ in ()).throw(RuntimeError("bad metadata")))
+    )
+
+    tracks = catalog["catalog_timeline_tracks"](
+        [missing_metadata, unusable_metadata, motion, face]
+    )
+
+    assert [track.name for track in tracks] == ["Character0", "Character0_face"]
+
+
 def test_recognized_candidate_keeps_typed_parent_diagnostics():
     catalog = _load_catalog_functions()
     unreadable = Reader(object(), 50, object())

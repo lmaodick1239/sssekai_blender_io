@@ -79,15 +79,23 @@ def timeline_track_enum(tracks):
 
 
 def _is_timeline_candidate(reader):
-    """Avoid resolving typed Unity readers that cannot be Timeline tracks."""
+    """Identify Timeline track readers without trusting missing type metadata."""
     serialized_type = getattr(reader, "serialized_type", None)
     node = getattr(serialized_type, "node", None)
-    if node is None:
-        return True
     traverse = getattr(node, "traverse", None)
-    if not callable(traverse):
-        return True
-    return any(getattr(field, "m_Name", None) == "m_Parent" for field in traverse())
+    if callable(traverse):
+        try:
+            return any(
+                getattr(field, "m_Name", None) == "m_Parent" for field in traverse()
+            )
+        except Exception:
+            pass
+
+    try:
+        value = reader.read()
+    except Exception:
+        return False
+    return hasattr(value, "m_Parent")
 
 
 def catalog_timeline_tracks(objects):
