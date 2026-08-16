@@ -851,9 +851,16 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
                     frames = timeline_clip_frames(spec, fps)
                     animation = read_animation(spec.animation_reader.read())
                     if kind == "MOTION":
-                        action = load_armature_animation(
-                            spec.display_name, animation, target, body_tos_leaf
-                        )
+                        previous_active = context.view_layer.objects.active
+                        try:
+                            context.view_layer.objects.active = target
+                            action = load_armature_animation(
+                                spec.display_name, animation, target, body_tos_leaf
+                            )
+                        finally:
+                            if context.view_layer.objects.active is target:
+                                bpy.ops.object.mode_set(mode="OBJECT")
+                            context.view_layer.objects.active = previous_active
                         if action_curve_count(action) == 0:
                             raise ValueError("generated body Action has no curves")
                     else:

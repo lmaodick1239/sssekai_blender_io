@@ -103,8 +103,21 @@ class FakeTrack:
         self.diagnostics = ()
 
 
+class FakeObject:
+    def __init__(self, name, object_type):
+        self.name = name
+        self.type = object_type
+        self.mode = "OBJECT"
+        self.active_when_loaded = None
+
+
 class FakeController(dict):
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.name = "SekaiCharacterRoot"
+        self.type = "EMPTY"
+        self.mode = "OBJECT"
+        self.view_layer_objects = None
 
 
 def _load_operator_class():
@@ -112,9 +125,20 @@ def _load_operator_class():
     tree = _source_tree(OPERATOR_SOURCE)
     class_node = _class(tree, "SSSekaiBlenderImportSekaiTimelineOperator")
     module = ast.Module(body=[class_node], type_ignores=[])
+    view_layer_objects = SimpleNamespace(active=None)
     bpy = SimpleNamespace(
         types=SimpleNamespace(Operator=object),
         data=SimpleNamespace(actions=[]),
+        context=SimpleNamespace(
+            view_layer=SimpleNamespace(objects=view_layer_objects),
+        ),
+    )
+    bpy.ops = SimpleNamespace(
+        object=SimpleNamespace(
+            mode_set=lambda mode: setattr(
+                bpy.context.view_layer.objects.active, "mode", mode
+            ),
+        ),
     )
     namespace = {
         "bpy": bpy,
@@ -171,6 +195,7 @@ def _operator_harness(
     action_store = Operator.execute.__globals__["bpy"].data.actions
 
     def load_body(name, animation, target, mapping):
+        target.active_when_loaded = context.view_layer.objects.active is target
         action = body_loader(name, animation, target, mapping) if body_loader else FakeAction(name)
         action_store.append(action)
         loads.append(("body", name, target))
@@ -216,15 +241,24 @@ def _operator_harness(
         "math": __import__("math"),
     })
     controller = FakeController(root=True)
-    controller["body"] = object() if body else None
-    controller["face"] = object() if face_target else None
+    controller["body"] = FakeObject("body", "ARMATURE") if body else None
+    controller["face"] = FakeObject("face", "ARMATURE") if face_target else None
     wm = SimpleNamespace(
         sssekai_selected_motion_track=motion.source_id if motion else "",
         sssekai_selected_face_track=face.source_id if face else "",
         sssekai_import_matching_face_track=paired,
     )
     scene = SimpleNamespace(render=SimpleNamespace(fps=30), frame_end=1, rigidbody_world=None)
-    context = SimpleNamespace(window_manager=wm, active_object=controller, scene=scene)
+    view_layer_objects = SimpleNamespace(active=controller)
+    controller.view_layer_objects = view_layer_objects
+    context = SimpleNamespace(
+        window_manager=wm,
+        active_object=controller,
+        scene=scene,
+        mode="OBJECT",
+        view_layer=SimpleNamespace(objects=view_layer_objects),
+    )
+    Operator.execute.__globals__["bpy"].context.view_layer = context.view_layer
     operator = Operator()
     operator.reports = reports
     operator.report = lambda level, message: reports.append((level, message))
@@ -240,6 +274,17 @@ def test_body_only_ignores_stale_face_selection_and_face_target():
     assert [kind for kind, _, _ in loads] == ["body"]
     assert all(strip.target is controller["body"] for strip in placements)
     assert controller["face"] not in [strip.target for strip in placements]
+
+
+def test_body_armature_is_active_during_motion_load_and_controller_is_restored():
+    body = FakeTrack("motion", "MOTION", FakeSpec("body-clip"))
+
+    result, placements, reports, loads, controller, actions = _operator_harness(body)
+
+    assert result == {"FINISHED"}
+    assert controller["body"].active_when_loaded is True
+    assert controller.view_layer_objects.active is controller
+    assert controller.mode == "OBJECT"
 
 
 def test_face_only_is_reachable_without_motion_or_pairing():
