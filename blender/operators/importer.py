@@ -869,6 +869,23 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
                     prepared.append((track, spec, frames, action, target))
                     imported += 1
                 except Exception as error:
+                    view_layer = getattr(context, "view_layer", None)
+                    active_object = getattr(getattr(view_layer, "objects", None), "active", None)
+                    logger.error(
+                        "Timeline clip preparation failed: kind=%s clip=%r "
+                        "context_mode=%r active=(name=%r type=%r mode=%r) "
+                        "target=(name=%r type=%r mode=%r) error=%s",
+                        kind,
+                        clip_label,
+                        getattr(context, "mode", None),
+                        getattr(active_object, "name", None),
+                        getattr(active_object, "type", None),
+                        getattr(active_object, "mode", None),
+                        getattr(target, "name", None),
+                        getattr(target, "type", None),
+                        getattr(target, "mode", None),
+                        error,
+                    )
                     self._discard_generated_action(action)
                     skipped += 1
                     warnings.append(f"{clip_label}: {error}")
