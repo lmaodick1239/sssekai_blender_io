@@ -777,6 +777,13 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
             detail += "; warnings=" + " | ".join(warnings)
         self.report({"WARNING" if skipped or warnings else "INFO"}, detail)
 
+    @staticmethod
+    def _discard_generated_action(action):
+        """Remove an unreferenced Action created for an invalid Timeline clip."""
+
+        if action is not None and getattr(action, "users", 0) == 0:
+            bpy.data.actions.remove(action)
+
     def execute(self, context):
         wm = context.window_manager
         controller = context.active_object
@@ -827,10 +834,6 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
         except Exception as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
-        offset = max(
-            append_start_frame(body) if body else 0.0,
-            append_start_frame(face_target) if face_target else 0.0,
-        )
         prepared = []
         motion_imported = motion_skipped = 0
         track_reports = []
@@ -843,6 +846,7 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
             target = body if kind == "MOTION" else face_target
             for spec in sorted(track.clips, key=lambda item: item.source_order):
                 clip_label = f"{track.name} / {spec.display_name}"
+                action = None
                 try:
                     frames = timeline_clip_frames(spec, fps)
                     animation = read_animation(spec.animation_reader.read())
@@ -865,6 +869,7 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
                     prepared.append((track, spec, frames, action, target))
                     imported += 1
                 except Exception as error:
+                    self._discard_generated_action(action)
                     skipped += 1
                     warnings.append(f"{clip_label}: {error}")
             track_reports.append((track, imported, skipped, warnings))
@@ -874,6 +879,8 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
         for track, imported, skipped, warnings in track_reports:
             self._report_track(track, imported, skipped, warnings)
         if motion and motion_imported == 0:
+            for _, _, _, action, _ in prepared:
+                self._discard_generated_action(action)
             self.report({"ERROR"}, T("No valid motion clips remain"))
             return {"CANCELLED"}
         if not prepared:
@@ -887,7 +894,7 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
             strip = place_action_strip(
                 target,
                 action,
-                offset + frames.timeline_start,
+                frames.timeline_start,
                 frames.timeline_end - frames.timeline_start,
                 frames.action_start,
                 frames.action_end,

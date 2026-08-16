@@ -48,7 +48,7 @@ def test_timeline_operator_and_explicit_pairing_contract_exists():
     source = ast.unparse(operator)
     assert "timeline_track_by_id" in source
     assert "place_action_strip" in source
-    assert "append_start_frame" in source
+    assert "append_start_frame" not in source
     assert "action_curve_count" in source
 
 
@@ -71,6 +71,7 @@ class FakeAction:
         self.name = name
         self.frame_range = (0.0, 30.0)
         self.curves = [object()] * curves
+        self.users = 0
 
 
 class FakeReader:
@@ -85,11 +86,12 @@ class FakeReader:
 
 
 class FakeSpec:
-    def __init__(self, name, order=0, reader=None, warning=None):
+    def __init__(self, name, order=0, reader=None, warning=None, validation_error=None):
         self.display_name = name
         self.source_order = order
         self.animation_reader = reader or FakeReader(name)
         self.warning = warning
+        self.validation_error = validation_error
 
 
 class FakeTrack:
@@ -109,7 +111,10 @@ def _load_operator_class():
     tree = _source_tree(OPERATOR_SOURCE)
     class_node = _class(tree, "SSSekaiBlenderImportSekaiTimelineOperator")
     module = ast.Module(body=[class_node], type_ignores=[])
-    bpy = SimpleNamespace(types=SimpleNamespace(Operator=object))
+    bpy = SimpleNamespace(
+        types=SimpleNamespace(Operator=object),
+        data=SimpleNamespace(actions=[]),
+    )
     namespace = {
         "bpy": bpy,
         "T": lambda text: text,
@@ -132,7 +137,17 @@ def _load_operator_class():
     return namespace["SSSekaiBlenderImportSekaiTimelineOperator"]
 
 
-def _operator_harness(motion=None, face=None, paired=False, body=True, face_target=True, body_loader=None):
+def _operator_harness(
+    motion=None,
+    face=None,
+    paired=False,
+    body=True,
+    face_target=True,
+    body_loader=None,
+    face_loader=None,
+    body_endpoint=0.0,
+    face_endpoint=0.0,
+):
     Operator = _load_operator_class()
     tracks = {track.source_id: track for track in (motion, face) if track}
     placements = []
@@ -147,14 +162,19 @@ def _operator_harness(motion=None, face=None, paired=False, body=True, face_targ
             raise ValueError("unavailable track")
         return track
 
+    action_store = Operator.execute.__globals__["bpy"].data.actions
+
     def load_body(name, animation, target, mapping):
         action = body_loader(name, animation, target, mapping) if body_loader else FakeAction(name)
+        action_store.append(action)
         loads.append(("body", name, target))
         return action
 
     def load_face(name, animation, mapping):
+        action = face_loader(name, animation, mapping) if face_loader else FakeAction(name)
+        action_store.append(action)
         loads.append(("face", name, mapping))
-        return FakeAction(name)
+        return action
 
     def place(target, action, start, duration, action_start, action_end, group, name=None):
         strip = SimpleNamespace(
@@ -178,8 +198,14 @@ def _operator_harness(motion=None, face=None, paired=False, body=True, face_targ
         "load_sekai_keyshape_animation": load_face,
         "action_curve_count": lambda action: len(action.curves),
         "timeline_clip_frames": globals_for_execute["timeline_clip_frames"],
-        "validate_timeline_clip": lambda spec, frame_range, fps: [spec.warning] if spec.warning else [],
-        "append_start_frame": lambda target: 0.0,
+        "validate_timeline_clip": lambda spec, frame_range, fps: (
+            (_ for _ in ()).throw(ValueError(spec.validation_error))
+            if spec.validation_error
+            else [spec.warning] if spec.warning else []
+        ),
+        "append_start_frame": lambda target: (
+            body_endpoint if target is controller["body"] else face_endpoint
+        ),
         "place_action_strip": place,
         "math": __import__("math"),
     })
@@ -197,13 +223,13 @@ def _operator_harness(motion=None, face=None, paired=False, body=True, face_targ
     operator.reports = reports
     operator.report = lambda level, message: reports.append((level, message))
     result = operator.execute(context)
-    return result, placements, reports, loads, controller
+    return result, placements, reports, loads, controller, action_store
 
 
 def test_body_only_ignores_stale_face_selection_and_face_target():
     body = FakeTrack("motion", "MOTION", FakeSpec("body-clip"))
     stale_face = FakeTrack("stale-face", "FACE", FakeSpec("face-clip"))
-    result, placements, reports, loads, controller = _operator_harness(body, stale_face)
+    result, placements, reports, loads, controller, actions = _operator_harness(body, stale_face)
     assert result == {"FINISHED"}
     assert [kind for kind, _, _ in loads] == ["body"]
     assert all(strip.target is controller["body"] for strip in placements)
@@ -212,7 +238,7 @@ def test_body_only_ignores_stale_face_selection_and_face_target():
 
 def test_face_only_is_reachable_without_motion_or_pairing():
     face = FakeTrack("face", "FACE", FakeSpec("face-clip"))
-    result, placements, reports, loads, controller = _operator_harness(None, face)
+    result, placements, reports, loads, controller, actions = _operator_harness(None, face)
     assert result == {"FINISHED"}
     assert [kind for kind, _, _ in loads] == ["face"]
     assert placements[0].target is controller["face"]
@@ -221,34 +247,110 @@ def test_face_only_is_reachable_without_motion_or_pairing():
 def test_paired_import_uses_independent_targets_and_synchronized_starts():
     body = FakeTrack("motion", "MOTION", FakeSpec("body-clip", order=0))
     face = FakeTrack("face", "FACE", FakeSpec("face-clip", order=0))
-    result, placements, reports, loads, controller = _operator_harness(body, face, paired=True)
+    result, placements, reports, loads, controller, actions = _operator_harness(body, face, paired=True)
     assert result == {"FINISHED"}
     assert {strip.target for strip in placements} == {controller["body"], controller["face"]}
     assert {strip.frame_start for strip in placements} == {0.0}
 
 
+def test_timeline_import_preserves_authored_starts_despite_existing_body_and_face_strips():
+    body = FakeTrack(
+        "motion",
+        "MOTION",
+        FakeSpec("body-clip", order=0),
+        FakeSpec("body-only", order=1),
+    )
+    face = FakeTrack("face", "FACE", FakeSpec("face-clip", order=0))
+
+    result, placements, reports, loads, controller, actions = _operator_harness(
+        body,
+        face,
+        paired=True,
+        body_endpoint=240.0,
+        face_endpoint=480.0,
+    )
+
+    assert result == {"FINISHED"}
+    assert [(strip.name, strip.frame_start) for strip in placements] == [
+        ("body-clip", 0.0),
+        ("face-clip", 0.0),
+        ("body-only", 60.0),
+    ]
+
+
 def test_invalid_clip_is_skipped_and_summary_identifies_track_and_clip():
     body = FakeTrack("motion", "MOTION", FakeSpec("broken", reader=FakeReader(error=ValueError("bad clip"))))
-    result, placements, reports, loads, controller = _operator_harness(body)
+    result, placements, reports, loads, controller, actions = _operator_harness(body)
     assert result == {"CANCELLED"}
     assert not placements
     assert any("motion / broken" in message and "skipped=1" in message for _, message in reports)
 
 
-def test_empty_body_action_is_skipped_without_empty_strip():
+def test_empty_body_action_is_removed_without_empty_strip():
     body = FakeTrack("motion", "MOTION", FakeSpec("empty"))
-    result, placements, reports, loads, controller = _operator_harness(
+    result, placements, reports, loads, controller, actions = _operator_harness(
         body, body_loader=lambda *args: FakeAction("empty", curves=0)
     )
     assert result == {"CANCELLED"}
     assert not placements
+    assert not actions
     assert any("generated body Action has no curves" in message for _, message in reports)
+
+
+def test_invalid_face_action_is_removed_when_face_only_import_is_cancelled():
+    face = FakeTrack("face", "FACE", FakeSpec("invalid", validation_error="source window outside Action"))
+
+    result, placements, reports, loads, controller, actions = _operator_harness(None, face)
+
+    assert result == {"CANCELLED"}
+    assert not placements
+    assert not actions
+
+
+def test_empty_face_action_is_removed_without_empty_strip():
+    face = FakeTrack("face", "FACE", FakeSpec("empty-face"))
+
+    result, placements, reports, loads, controller, actions = _operator_harness(
+        None,
+        face,
+        face_loader=lambda *args: FakeAction("empty-face", curves=0),
+    )
+
+    assert result == {"CANCELLED"}
+    assert not placements
+    assert not actions
+
+
+def test_invalid_referenced_action_is_not_removed():
+    body = FakeTrack("motion", "MOTION", FakeSpec("referenced", validation_error="bad body window"))
+    referenced = FakeAction("referenced")
+    referenced.users = 1
+
+    result, placements, reports, loads, controller, actions = _operator_harness(
+        body,
+        body_loader=lambda *args: referenced,
+    )
+
+    assert result == {"CANCELLED"}
+    assert not placements
+    assert actions == [referenced]
+
+
+def test_cancelled_paired_import_removes_prepared_face_action_after_invalid_body():
+    body = FakeTrack("motion", "MOTION", FakeSpec("invalid-body", validation_error="bad body window"))
+    face = FakeTrack("face", "FACE", FakeSpec("valid-face"))
+
+    result, placements, reports, loads, controller, actions = _operator_harness(body, face, paired=True)
+
+    assert result == {"CANCELLED"}
+    assert not placements
+    assert not actions
 
 
 @pytest.mark.parametrize("paired", [False, True])
 def test_face_selection_requires_motion_only_when_pairing_is_explicit(paired):
     face = FakeTrack("face", "FACE", FakeSpec("face-clip"))
-    result, placements, reports, loads, controller = _operator_harness(None, face, paired=paired)
+    result, placements, reports, loads, controller, actions = _operator_harness(None, face, paired=paired)
     if paired:
         assert result == {"CANCELLED"}
         assert not placements

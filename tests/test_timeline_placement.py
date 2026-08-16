@@ -194,7 +194,13 @@ def test_timeline_frames_reject_invalid_duration_scale_and_clip_in():
         _raises(ValueError, lambda fps=fps: TIMELINE.timeline_clip_frames(_spec(), fps))
 
 
-def test_validation_rejects_action_range_mismatch_and_returns_finite_semantic_warnings():
+def test_validation_accepts_positive_clip_in_with_full_source_action_range():
+    spec = _spec(clip_in_seconds=0.5, duration_seconds=1.0, time_scale=1.0)
+
+    assert TIMELINE.validate_timeline_clip(spec, (0.0, 90.0), 30.0) == []
+
+
+def test_validation_rejects_requested_window_outside_action_and_returns_semantic_warnings():
     spec = _spec(
         transition_metadata={"m_EaseInDuration": 0.25, "m_MixInCurve": {"key": 1}},
         extrapolation_metadata={"m_PostExtrapolationMode": "Loop"},
@@ -204,7 +210,7 @@ def test_validation_rejects_action_range_mismatch_and_returns_finite_semantic_wa
             "m_ApplyFootIK": True,
         },
     )
-    warnings = TIMELINE.validate_timeline_clip(spec, (15.0, 195.0), 30.0)
+    warnings = TIMELINE.validate_timeline_clip(spec, (0.0, 195.0), 30.0)
 
     assert warnings
     warning_text = " ".join(warnings).lower()
@@ -215,7 +221,23 @@ def test_validation_rejects_action_range_mismatch_and_returns_finite_semantic_wa
     assert "foot" in warning_text
     _raises(
         ValueError,
-        lambda: TIMELINE.validate_timeline_clip(spec, (15.0, 194.0), 30.0),
+        lambda: TIMELINE.validate_timeline_clip(spec, (0.0, 194.0), 30.0),
+    )
+
+
+def test_validation_ignores_empty_serialized_mix_curves_but_warns_for_curve_keys():
+    empty_curve = _spec(
+        transition_metadata={
+            "m_MixInCurve": {"m_Curve": []},
+            "m_MixOutCurve": {"m_Curve": ()},
+        }
+    )
+    keyed_curve = _spec(transition_metadata={"m_MixInCurve": {"m_Curve": [{"time": 0.0}]}})
+
+    assert TIMELINE.validate_timeline_clip(empty_curve, (0.0, 195.0), 30.0) == []
+    assert any(
+        "mix" in warning.lower()
+        for warning in TIMELINE.validate_timeline_clip(keyed_curve, (0.0, 195.0), 30.0)
     )
 
 

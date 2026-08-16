@@ -277,6 +277,21 @@ def _metadata_enabled(value: Any) -> bool:
     return bool(value)
 
 
+def _mix_curve_has_keys(value: Any) -> bool:
+    """Return whether a serialized Unity mix curve contains curve keys."""
+
+    if value is None:
+        return False
+    if isinstance(value, Mapping):
+        for field in ("m_Curve", "curve", "keys", "keyframes"):
+            if field in value:
+                return bool(value[field])
+        return bool(value)
+    if hasattr(value, "m_Curve"):
+        return bool(value.m_Curve)
+    return bool(value)
+
+
 def validate_timeline_clip(
     spec: TimelineClipSpec,
     action_frame_range: tuple[float, float],
@@ -293,17 +308,21 @@ def validate_timeline_clip(
     if action_end <= action_start:
         raise ValueError("action frame range must be increasing")
     if (
-        abs(action_start - frames.action_start) > _FRAME_TOLERANCE
-        or abs(action_end - frames.action_end) > _FRAME_TOLERANCE
+        frames.action_start < action_start - _FRAME_TOLERANCE
+        or frames.action_end > action_end + _FRAME_TOLERANCE
     ):
         raise ValueError(
-            "generated Action frame range does not match requested Timeline range"
+            "requested Timeline source window is outside generated Action frame range"
         )
 
     warnings: list[str] = []
     if any(
         _metadata_enabled(spec.transition_metadata.get(field))
         for field in _TRANSITION_FIELDS
+        if field not in ("m_MixInCurve", "m_MixOutCurve")
+    ) or any(
+        _mix_curve_has_keys(spec.transition_metadata.get(field))
+        for field in ("m_MixInCurve", "m_MixOutCurve")
     ):
         warnings.append("nonzero Timeline ease/blend/mix metadata is not applied")
 
