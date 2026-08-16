@@ -365,7 +365,8 @@ def place_action_strip(
         nla_track = nla_tracks.new()
     nla_track.name = track_group
     strip_name = name or action.name
-    strip = nla_track.strips.new(strip_name, timeline_start, action)
+    strip = nla_track.strips.new(strip_name, int(timeline_start), action)
+    strip.frame_start = timeline_start
     strip.action_frame_start = action_start
     strip.action_frame_end = action_end
     strip.frame_end = timeline_start + timeline_duration

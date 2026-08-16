@@ -24,7 +24,7 @@ def _load_helpers():
     """Load helpers with only its Blender-facing imports replaced by doubles."""
     package = ModuleType("task2_helpers_package")
     package.__path__ = []
-    package.logger = SimpleNamespace()
+    package.logger = SimpleNamespace(error=lambda *_args, **_kwargs: None)
     package.register_wm_props = lambda **kwargs: None
     package.register_class = lambda value: value
     package.sssekai_global = SimpleNamespace()
@@ -106,6 +106,8 @@ class FakeStrip:
 
 class FakeStrips(list):
     def new(self, name, frame_start, action):
+        if not isinstance(frame_start, int):
+            raise TypeError("NlaStrips.new start must be an int")
         strip = FakeStrip(name, frame_start, action)
         self.append(strip)
         return strip
