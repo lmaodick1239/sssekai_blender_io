@@ -71,6 +71,7 @@ class TimelineTrackRef:
     name: str
     kind: TimelineTrackKind
     clips: tuple[TimelineClipSpec, ...]
+    diagnostics: tuple[str, ...] = ()
 
 
 class TimelineResolutionError(ValueError):
@@ -361,7 +362,9 @@ def _track_kind(parent_name: str) -> TimelineTrackKind | None:
     return None
 
 
-def discover_timeline_tracks(objects: Iterable[Any]) -> list[TimelineTrackRef]:
+def discover_timeline_tracks(
+    objects: Iterable[Any], *, tolerate_unresolved_clips: bool = False
+) -> list[TimelineTrackRef]:
     """Discover direct Timeline children below the recognized Motion and Face groups."""
 
     tracks: list[TimelineTrackRef] = []
@@ -408,10 +411,14 @@ def discover_timeline_tracks(objects: Iterable[Any]) -> list[TimelineTrackRef]:
         if kind is None:
             continue
         resolved_clips = []
+        diagnostics = []
         for source_order, clip in enumerate(getattr(track, "m_Clips", ()) or ()):
             try:
                 resolved_clips.append(resolve_timeline_clip(clip, source_order))
             except TimelineResolutionError as error:
+                if tolerate_unresolved_clips:
+                    diagnostics.append(str(error))
+                    continue
                 raise TimelineResolutionError(
                     str(error),
                     track_source_id=track_source_id,
@@ -428,12 +435,13 @@ def discover_timeline_tracks(objects: Iterable[Any]) -> list[TimelineTrackRef]:
                 name=track_name,
                 kind=kind,
                 clips=tuple(resolved_clips),
+                diagnostics=tuple(diagnostics),
             )
         )
     return tracks
 
 
 def catalog_timeline_tracks(objects: Iterable[Any]) -> list[TimelineTrackRef]:
-    """Return the Timeline track catalog in the source object order."""
+    """Return catalog entries while retaining valid clips from partially unresolved tracks."""
 
-    return discover_timeline_tracks(objects)
+    return discover_timeline_tracks(objects, tolerate_unresolved_clips=True)

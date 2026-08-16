@@ -116,12 +116,19 @@ def catalog_timeline_tracks(objects):
                 name=track.name,
                 kind=track.kind,
                 clips=track.clips,
+                diagnostics=track.diagnostics,
             )
         )
     return tracks
 
 
 def enumerate_timeline_tracks(context):
+    if context is not None:
+        wm = context.window_manager
+        update_environment(
+            wm.sssekai_selected_assetbundle_file,
+            wm.sssekai_selected_assetbundle_file_aux,
+        )
     return sssekai_global.timeline_track_enum or [EMPTY_OPT]
 
 
@@ -152,6 +159,9 @@ def update_environment(path: str, aux_path: str):
             sssekai_global.env.load_folder(aux_path)
 
         sssekai_global.timeline_tracks = catalog_timeline_tracks(sssekai_global.env.objects)
+        for track in sssekai_global.timeline_tracks:
+            for diagnostic in track.diagnostics:
+                logger.warning("Skipping Timeline clip in %s: %s", track.name, diagnostic)
         sssekai_global.timeline_track_enum = timeline_track_enum(
             sssekai_global.timeline_tracks
         )

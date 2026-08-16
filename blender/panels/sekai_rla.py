@@ -79,7 +79,7 @@ class SSSekaiRLAImportPanel(bpy.types.Panel):
                 logger.debug("RLA version: %s" % header["version"])
         except Exception as e:
             logger.error("Failed to load RLA bundle: %s" % e)
-        return sssekai_global.rla_enum_entries
+        return sssekai_global.rla_enum_entries or [("NONE", "None", "", 0)]
 
     @classmethod
     def poll(self, context):

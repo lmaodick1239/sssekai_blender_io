@@ -1,19 +1,32 @@
 from dataclasses import FrozenInstanceError
+import importlib.util
 from pathlib import Path
 import sys
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from sssekai_blender_io.blender.core.timeline import (
-    TimelineClipSpec,
-    TimelineResolutionError,
-    TimelineTrackRef,
-    catalog_timeline_tracks,
-    discover_timeline_tracks,
-    resolve_timeline_clip,
-)
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_timeline():
+    module_name = "timeline_resolver_under_test"
+    spec = importlib.util.spec_from_file_location(
+        module_name, ROOT / "blender/core/timeline.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+TIMELINE = _load_timeline()
+TimelineClipSpec = TIMELINE.TimelineClipSpec
+TimelineResolutionError = TIMELINE.TimelineResolutionError
+TimelineTrackRef = TIMELINE.TimelineTrackRef
+catalog_timeline_tracks = TIMELINE.catalog_timeline_tracks
+discover_timeline_tracks = TIMELINE.discover_timeline_tracks
+resolve_timeline_clip = TIMELINE.resolve_timeline_clip
 
 
 class Reader:
@@ -174,6 +187,32 @@ def test_empty_recognized_tracks_are_retained_and_catalog_matches_discovery():
     assert discovered[0].clips == ()
 
 
+def test_catalog_retains_resolvable_clips_when_a_sibling_pointer_is_unresolved():
+    first, _, _ = make_clip("first valid", 10)
+    broken = TimelineClip(
+        "missing animation",
+        Reader(PlayableAsset(Reader(None, 333)), 222),
+        m_Start=1.0,
+        m_Duration=1.0,
+        m_ClipIn=0.0,
+        m_TimeScale=1.0,
+    )
+    last, _, _ = make_clip("last valid", 30)
+
+    tracks = catalog_timeline_tracks(
+        [make_track("Character0_insert", "Motion Group", 100, [first, broken, last])]
+    )
+
+    assert len(tracks) == 1
+    assert tracks[0].name == "Character0_insert"
+    assert [clip.display_name for clip in tracks[0].clips] == ["first valid", "last valid"]
+    assert [clip.source_order for clip in tracks[0].clips] == [0, 2]
+    assert tracks[0].diagnostics == (
+        "unresolved animation clip reference (clip='missing animation', "
+        "clip_source_id=222, animation_source_id=333, source_order=1)",
+    )
+
+
 def test_resolver_captures_raw_transition_extrapolation_and_playable_metadata():
     clip, _, playable = make_clip(
         "metadata clip",
@@ -311,9 +350,7 @@ def test_unrecognized_groups_remain_ignored_even_with_broken_clips():
 
 
 def test_resolver_source_has_no_mvdata_dependency_or_file_access():
-    import sssekai_blender_io.blender.core.timeline as timeline
-
-    source = Path(timeline.__file__).read_text(encoding="utf-8").lower()
+    source = Path(TIMELINE.__file__).read_text(encoding="utf-8").lower()
     assert "mvdata" not in source
     assert "xtract" not in source
     assert "open(" not in source

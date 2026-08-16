@@ -152,6 +152,40 @@ def test_cached_lookup_and_enumeration_use_catalog_ids():
     assert catalog["enumerate_timeline_tracks"](None) == catalog["timeline_track_enum"](tracks)
 
 
+def test_timeline_enumeration_loads_the_selected_directory_before_reading_cache():
+    import ast
+
+    source = (ROOT / "blender/panels/importer.py").read_text()
+    tree = ast.parse(source)
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "enumerate_timeline_tracks"
+    )
+    global_state = SimpleNamespace(timeline_track_enum=[])
+    calls = []
+
+    def update_environment(path, aux_path):
+        calls.append((path, aux_path))
+        global_state.timeline_track_enum = [("track", "Track", "", "ANIM_DATA", 0)]
+
+    namespace = {
+        "sssekai_global": global_state,
+        "update_environment": update_environment,
+        "EMPTY_OPT": ("<empty>", "Not Available", "", "ERROR", 0),
+    }
+    exec(compile(ast.Module(body=[function], type_ignores=[]), "importer.py", "exec"), namespace)
+    context = SimpleNamespace(
+        window_manager=SimpleNamespace(
+            sssekai_selected_assetbundle_file="xtract/unitysource",
+            sssekai_selected_assetbundle_file_aux="",
+        )
+    )
+
+    assert namespace["enumerate_timeline_tracks"](context) == global_state.timeline_track_enum
+    assert calls == [("xtract/unitysource", "")]
+
+
 def test_catalog_does_not_use_external_mvdata_or_arbitrary_groups():
     catalog_timeline_tracks = _load_catalog_functions()["catalog_timeline_tracks"]
     tracks = catalog_timeline_tracks([
