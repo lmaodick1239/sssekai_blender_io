@@ -736,11 +736,24 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
             for child in bone.children:
                 yield from visit(child, path)
 
-        result = dict(
-            item
-            for root in body.data.bones
-            if root.parent is None
-            for item in visit(root)
+        roots = [bone for bone in body.data.bones if bone.parent is None]
+        result = dict(item for root in roots for item in visit(root))
+        logger.error(
+            "Timeline body TOS map: body=%r entries=%d roots=%s",
+            getattr(body, "name", None),
+            len(result),
+            [
+                (
+                    root.name,
+                    root.get(KEY_HIERARCHY_BONE_NAME, root.name),
+                    KEY_HIERARCHY_BONE_ROOT in root,
+                    [
+                        child.get(KEY_HIERARCHY_BONE_NAME, child.name)
+                        for child in root.children
+                    ],
+                )
+                for root in roots
+            ],
         )
         result[0] = next(
             (bone.name for bone in body.data.bones if bone.parent is None),
