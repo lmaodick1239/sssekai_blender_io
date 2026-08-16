@@ -831,21 +831,6 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
         try:
             face_target, face_crc_table = self._face_target(face) if face_track else (None, None)
             body_tos_leaf = self._body_tos_leaf(body) if motion else None
-            if body_tos_leaf is not None:
-                position_bone = getattr(getattr(body, "pose", None), "bones", {}).get(
-                    "Position"
-                )
-                position_scale_driver = (
-                    position_bone.driver_find("scale") if position_bone else None
-                )
-                getattr(logger, "debug", lambda *_args, **_kwargs: None)(
-                    "Timeline body import setup: body=%r fps=%r tos_entries=%d "
-                    "position_scale_driver=%s",
-                    getattr(body, "name", None),
-                    fps,
-                    len(body_tos_leaf),
-                    bool(position_scale_driver),
-                )
         except Exception as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
@@ -871,19 +856,6 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
                             context.view_layer.objects.active = target
                             action = load_armature_animation(
                                 spec.display_name, animation, target, body_tos_leaf
-                            )
-                            position_bone = getattr(
-                                getattr(target, "pose", None), "bones", {}
-                            ).get("Position")
-                            position_scale_driver = (
-                                position_bone.driver_find("scale") if position_bone else None
-                            )
-                            getattr(logger, "debug", lambda *_args, **_kwargs: None)(
-                                "Timeline body action generated: clip=%r curves=%d "
-                                "position_scale_driver=%s",
-                                spec.display_name,
-                                action_curve_count(action),
-                                bool(position_scale_driver),
                             )
                         finally:
                             if context.view_layer.objects.active is target:
