@@ -793,6 +793,17 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
 
         motion_id = wm.sssekai_selected_motion_track
         face_id = wm.sssekai_selected_face_track
+        getattr(logger, "info", lambda *_args, **_kwargs: None)(
+            "Timeline import start: controller=%r motion_id=%r face_id=%r paired=%s scene_fps=%r scene_frame_end=%r body_present=%s face_present=%s",
+            getattr(controller, "name", None),
+            motion_id,
+            face_id,
+            bool(getattr(wm, "sssekai_import_matching_face_track", False)),
+            getattr(context.scene.render, "fps", None),
+            getattr(context.scene, "frame_end", None),
+            bool(controller.get(KEY_SEKAI_CHARACTER_BODY_OBJ)),
+            bool(controller.get(KEY_SEKAI_CHARACTER_FACE_OBJ)),
+        )
         if motion_id == "<no assest selected!>":
             motion_id = ""
         if face_id == "<no assest selected!>":
@@ -834,6 +845,15 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
         except Exception as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
+        getattr(logger, "info", lambda *_args, **_kwargs: None)(
+            "Timeline import targets ready: motion_track=%r face_track=%r body_target=%r face_target=%r motion_clip_count=%d face_clip_count=%d",
+            getattr(motion, "name", None),
+            getattr(face_track, "name", None),
+            getattr(body, "name", None),
+            getattr(face_target, "name", None),
+            len(getattr(motion, "clips", ()) or ()),
+            len(getattr(face_track, "clips", ()) or ()),
+        )
         prepared = []
         motion_imported = motion_skipped = 0
         track_reports = []
@@ -844,11 +864,30 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
             imported = skipped = 0
             warnings = []
             target = body if kind == "MOTION" else face_target
+            getattr(logger, "debug", lambda *_args, **_kwargs: None)(
+                "Timeline import track start: kind=%s track=%r source_id=%r clip_count=%d target=%r",
+                kind,
+                track.name,
+                track.source_id,
+                len(track.clips),
+                getattr(target, "name", None),
+            )
             for spec in sorted(track.clips, key=lambda item: item.source_order):
                 clip_label = f"{track.name} / {spec.display_name}"
                 action = None
+                frames = None
                 try:
                     frames = timeline_clip_frames(spec, fps)
+                    getattr(logger, "debug", lambda *_args, **_kwargs: None)(
+                        "Timeline import clip resolved: kind=%s clip=%r source_order=%d timeline_start=%r timeline_end=%r action_start=%r action_end=%r",
+                        kind,
+                        clip_label,
+                        spec.source_order,
+                        frames.timeline_start,
+                        frames.timeline_end,
+                        frames.action_start,
+                        frames.action_end,
+                    )
                     animation = read_animation(spec.animation_reader.read())
                     if kind == "MOTION":
                         previous_active = context.view_layer.objects.active
@@ -861,11 +900,26 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
                             if context.view_layer.objects.active is target:
                                 bpy.ops.object.mode_set(mode="OBJECT")
                             context.view_layer.objects.active = previous_active
+                        getattr(logger, "debug", lambda *_args, **_kwargs: None)(
+                            "Timeline import body action loaded: clip=%r action=%r curves=%d action_frame_range=%r target_active_restored=%s",
+                            clip_label,
+                            getattr(action, "name", None),
+                            action_curve_count(action),
+                            getattr(action, "frame_range", None),
+                            context.view_layer.objects.active is previous_active,
+                        )
                         if action_curve_count(action) == 0:
                             raise ValueError("generated body Action has no curves")
                     else:
                         action = load_sekai_keyshape_animation(
                             spec.display_name, animation, face_crc_table
+                        )
+                        getattr(logger, "debug", lambda *_args, **_kwargs: None)(
+                            "Timeline import face action loaded: clip=%r action=%r curves=%d action_frame_range=%r",
+                            clip_label,
+                            getattr(action, "name", None),
+                            action_curve_count(action),
+                            getattr(action, "frame_range", None),
                         )
                         if action_curve_count(action) == 0:
                             raise ValueError("generated face Action has no curves")
@@ -875,15 +929,22 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
                     )
                     prepared.append((track, spec, frames, action, target))
                     imported += 1
+                    getattr(logger, "debug", lambda *_args, **_kwargs: None)(
+                        "Timeline import clip prepared: kind=%s clip=%r source_order=%d imported_count=%d skipped_count=%d",
+                        kind,
+                        clip_label,
+                        spec.source_order,
+                        imported,
+                        skipped,
+                    )
                 except Exception as error:
                     view_layer = getattr(context, "view_layer", None)
                     active_object = getattr(getattr(view_layer, "objects", None), "active", None)
                     logger.error(
-                        "Timeline clip preparation failed: kind=%s clip=%r "
-                        "context_mode=%r active=(name=%r type=%r mode=%r) "
-                        "target=(name=%r type=%r mode=%r) error=%s",
+                        "Timeline clip preparation failed: kind=%s clip=%r source_order=%d context_mode=%r active=(name=%r type=%r mode=%r) target=(name=%r type=%r mode=%r) action_loaded=%s timeline_frames=%r error=%s",
                         kind,
                         clip_label,
+                        spec.source_order,
                         getattr(context, "mode", None),
                         getattr(active_object, "name", None),
                         getattr(active_object, "type", None),
@@ -891,17 +952,36 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
                         getattr(target, "name", None),
                         getattr(target, "type", None),
                         getattr(target, "mode", None),
+                        action is not None,
+                        frames,
                         error,
                     )
                     self._discard_generated_action(action)
                     skipped += 1
                     warnings.append(f"{clip_label}: {error}")
             track_reports.append((track, imported, skipped, warnings))
+            getattr(logger, "debug", lambda *_args, **_kwargs: None)(
+                "Timeline import track complete: kind=%s track=%r imported=%d skipped=%d warning_count=%d",
+                kind,
+                track.name,
+                imported,
+                skipped,
+                len(warnings),
+            )
             if kind == "MOTION":
                 motion_imported, motion_skipped = imported, skipped
 
         for track, imported, skipped, warnings in track_reports:
             self._report_track(track, imported, skipped, warnings)
+        getattr(logger, "info", lambda *_args, **_kwargs: None)(
+            "Timeline import preparation summary: motion_selected=%s face_selected=%s prepared=%d motion_imported=%d motion_skipped=%d total_tracks=%d",
+            bool(motion),
+            bool(face_track),
+            len(prepared),
+            motion_imported,
+            motion_skipped,
+            len(track_reports),
+        )
         if motion and motion_imported == 0:
             logger.error(
                 "No valid motion clips remain: selected_id=%r track=%r clips=%d "
@@ -941,7 +1021,25 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
                 name=spec.display_name,
             )
             largest_end = max(largest_end, strip.frame_end)
-        context.scene.frame_end = int(math.ceil(largest_end))
+            getattr(logger, "debug", lambda *_args, **_kwargs: None)(
+                "Timeline import placement complete: kind=%s clip=%r frame_start=%r frame_end=%r action_frame_start=%r action_frame_end=%r track=%r target=%r",
+                track.kind,
+                spec.display_name,
+                strip.frame_start,
+                strip.frame_end,
+                getattr(strip, "action_frame_start", None),
+                getattr(strip, "action_frame_end", None),
+                track.name,
+                getattr(target, "name", None),
+            )
+        final_frame_end = int(math.ceil(largest_end))
+        getattr(logger, "info", lambda *_args, **_kwargs: None)(
+            "Timeline import final range: largest_end=%r final_scene_frame_end=%r rigidbody_present=%s",
+            largest_end,
+            final_frame_end,
+            bool(context.scene.rigidbody_world),
+        )
+        context.scene.frame_end = final_frame_end
         if context.scene.rigidbody_world:
             context.scene.rigidbody_world.point_cache.frame_end = max(
                 context.scene.rigidbody_world.point_cache.frame_end,

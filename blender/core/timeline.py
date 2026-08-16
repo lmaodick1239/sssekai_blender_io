@@ -1,9 +1,13 @@
 """Pure Unity Timeline track discovery and playable-asset resolution."""
 
 from dataclasses import dataclass
+from logging import getLogger
 import math
 from types import MappingProxyType
 from typing import Any, Iterable, Literal, Mapping
+
+
+logger = getLogger("sssekai")
 
 
 TimelineTrackKind = Literal["MOTION", "FACE"]
@@ -198,6 +202,16 @@ def resolve_timeline_clip(clip: Any, source_order: int) -> TimelineClipSpec:
     display_name = _clip_display_name(clip)
     asset_reader = getattr(clip, "m_Asset", None)
     asset_source_id = _source_id(asset_reader)
+    logger.debug(
+        "Timeline clip resolve start: clip=%r source_order=%d asset_source_id=%r start=%r duration=%r clip_in=%r time_scale=%r",
+        display_name,
+        source_order,
+        asset_source_id,
+        getattr(clip, "m_Start", None),
+        getattr(clip, "m_Duration", None),
+        getattr(clip, "m_ClipIn", None),
+        getattr(clip, "m_TimeScale", None),
+    )
     playable = _read_reference(
         asset_reader,
         label="playable asset",
@@ -214,7 +228,7 @@ def resolve_timeline_clip(clip: Any, source_order: int) -> TimelineClipSpec:
         clip_source_id=asset_source_id,
         animation_source_id=_source_id(animation_reader),
     )
-    return TimelineClipSpec(
+    spec = TimelineClipSpec(
         source_id=_source_id(animation_reader),
         display_name=display_name,
         animation_reader=animation_reader,
@@ -227,6 +241,17 @@ def resolve_timeline_clip(clip: Any, source_order: int) -> TimelineClipSpec:
         playable_metadata=_metadata(playable, _PLAYABLE_FIELDS),
         source_order=source_order,
     )
+    logger.debug(
+        "Timeline clip resolve complete: clip=%r source_order=%d animation_source_id=%r start_seconds=%r duration_seconds=%r clip_in_seconds=%r time_scale=%r",
+        spec.display_name,
+        spec.source_order,
+        spec.source_id,
+        spec.start_seconds,
+        spec.duration_seconds,
+        spec.clip_in_seconds,
+        spec.time_scale,
+    )
+    return spec
 
 
 _FRAME_TOLERANCE = 1e-3
@@ -265,7 +290,17 @@ def timeline_clip_frames(spec: TimelineClipSpec, fps: float) -> TimelineFrameRan
     action_end = action_start + duration_seconds * time_scale * scene_fps
     if action_end <= action_start:
         raise ValueError("action_end must be greater than action_start")
-    return TimelineFrameRange(timeline_start, timeline_end, action_start, action_end)
+    frames = TimelineFrameRange(timeline_start, timeline_end, action_start, action_end)
+    logger.debug(
+        "Timeline clip frame conversion: clip=%r fps=%r timeline_start=%r timeline_end=%r action_start=%r action_end=%r",
+        spec.display_name,
+        scene_fps,
+        frames.timeline_start,
+        frames.timeline_end,
+        frames.action_start,
+        frames.action_end,
+    )
+    return frames
 
 
 def _metadata_enabled(value: Any) -> bool:
@@ -367,9 +402,20 @@ def discover_timeline_tracks(
 ) -> list[TimelineTrackRef]:
     """Discover direct Timeline children below the recognized Motion and Face groups."""
 
+    objects = tuple(objects)
+    logger.debug(
+        "Timeline discovery start: objects=%d tolerate_unresolved_clips=%s",
+        len(objects),
+        tolerate_unresolved_clips,
+    )
     tracks: list[TimelineTrackRef] = []
     for track_reader in objects:
         if not callable(getattr(track_reader, "read", None)):
+            logger.debug(
+                "Timeline discovery skipped unreadable object: source_id=%r type=%r",
+                _source_id(track_reader),
+                type(track_reader).__name__,
+            )
             continue
         track_source_id = _source_id(track_reader)
         try:
@@ -409,13 +455,42 @@ def discover_timeline_tracks(
         parent_name = getattr(parent, "m_Name", "")
         kind = _track_kind(parent_name)
         if kind is None:
+            logger.debug(
+                "Timeline discovery ignored track outside Motion/Face group: track=%r parent=%r source_id=%r",
+                track_name,
+                parent_name,
+                track_source_id,
+            )
             continue
+        logger.debug(
+            "Timeline track candidate: track=%r parent=%r kind=%s source_id=%r clip_count=%d",
+            track_name,
+            parent_name,
+            kind,
+            track_source_id,
+            len(getattr(track, "m_Clips", ()) or ()),
+        )
         resolved_clips = []
         diagnostics = []
         for source_order, clip in enumerate(getattr(track, "m_Clips", ()) or ()):
             try:
-                resolved_clips.append(resolve_timeline_clip(clip, source_order))
+                resolved_clip = resolve_timeline_clip(clip, source_order)
+                resolved_clips.append(resolved_clip)
+                logger.debug(
+                    "Timeline clip retained: track=%r clip=%r source_order=%d animation_source_id=%r",
+                    track_name,
+                    resolved_clip.display_name,
+                    source_order,
+                    resolved_clip.source_id,
+                )
             except TimelineResolutionError as error:
+                logger.debug(
+                    "Timeline clip resolution failed: track=%r source_order=%d clip_source_id=%r error=%s",
+                    track_name,
+                    source_order,
+                    _source_id(clip),
+                    error,
+                )
                 if tolerate_unresolved_clips:
                     diagnostics.append(str(error))
                     continue
@@ -428,16 +503,24 @@ def discover_timeline_tracks(
                     clip_display_name=error.clip_display_name,
                     source_order=error.source_order,
                 ) from error
-        tracks.append(
-            TimelineTrackRef(
-                source_id=track_source_id,
-                parent_name=parent_name,
-                name=track_name,
-                kind=kind,
-                clips=tuple(resolved_clips),
-                diagnostics=tuple(diagnostics),
-            )
+        track_ref = TimelineTrackRef(
+            source_id=track_source_id,
+            parent_name=parent_name,
+            name=track_name,
+            kind=kind,
+            clips=tuple(resolved_clips),
+            diagnostics=tuple(diagnostics),
         )
+        logger.debug(
+            "Timeline track discovery complete: track=%r kind=%s source_id=%r clips=%d diagnostics=%d",
+            track_ref.name,
+            track_ref.kind,
+            track_ref.source_id,
+            len(track_ref.clips),
+            len(track_ref.diagnostics),
+        )
+        tracks.append(track_ref)
+    logger.debug("Timeline discovery complete: tracks=%d", len(tracks))
     return tracks
 
 
