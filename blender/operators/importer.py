@@ -879,6 +879,21 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
         for track, imported, skipped, warnings in track_reports:
             self._report_track(track, imported, skipped, warnings)
         if motion and motion_imported == 0:
+            logger.error(
+                "No valid motion clips remain: selected_id=%r track=%r clips=%d "
+                "catalog_motion_tracks=%s source=%r aux=%r failures=%s",
+                motion_id,
+                motion.name,
+                len(motion.clips),
+                [
+                    (track.source_id, track.name, len(track.clips), len(track.diagnostics))
+                    for track in sssekai_global.timeline_tracks
+                    if track.kind == "MOTION"
+                ],
+                sssekai_global.env_path,
+                sssekai_global.env_aux_path,
+                warnings,
+            )
             for _, _, _, action, _ in prepared:
                 self._discard_generated_action(action)
             self.report({"ERROR"}, T("No valid motion clips remain"))

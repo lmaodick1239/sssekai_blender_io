@@ -100,6 +100,7 @@ class FakeTrack:
         self.kind = kind
         self.clips = list(clips)
         self.source_id = name
+        self.diagnostics = ()
 
 
 class FakeController(dict):
@@ -119,6 +120,10 @@ def _load_operator_class():
         "bpy": bpy,
         "T": lambda text: text,
         "register_class": lambda value: value,
+        "logger": SimpleNamespace(error=lambda *_args, **_kwargs: None),
+        "sssekai_global": SimpleNamespace(
+            timeline_tracks=[], env_path="", env_aux_path=""
+        ),
         "KEY_SEKAI_CHARACTER_ROOT": "root",
         "KEY_SEKAI_CHARACTER_BODY_OBJ": "body",
         "KEY_SEKAI_CHARACTER_FACE_OBJ": "face",
@@ -150,6 +155,7 @@ def _operator_harness(
 ):
     Operator = _load_operator_class()
     tracks = {track.source_id: track for track in (motion, face) if track}
+    Operator.execute.__globals__["sssekai_global"].timeline_tracks = list(tracks.values())
     placements = []
     reports = []
     loads = []

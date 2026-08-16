@@ -159,6 +159,28 @@ def update_environment(path: str, aux_path: str):
             sssekai_global.env.load_folder(aux_path)
 
         sssekai_global.timeline_tracks = catalog_timeline_tracks(sssekai_global.env.objects)
+        motion_tracks = [
+            track for track in sssekai_global.timeline_tracks if track.kind == "MOTION"
+        ]
+        face_tracks = [
+            track for track in sssekai_global.timeline_tracks if track.kind == "FACE"
+        ]
+        logger.info(
+            "Timeline catalog: source=%r aux=%r objects=%d tracks=%d motion=%d face=%d",
+            path,
+            aux_path,
+            len(sssekai_global.env.objects),
+            len(sssekai_global.timeline_tracks),
+            len(motion_tracks),
+            len(face_tracks),
+        )
+        logger.debug(
+            "Timeline motion tracks: %s",
+            [
+                (track.source_id, track.name, len(track.clips), len(track.diagnostics))
+                for track in motion_tracks
+            ],
+        )
         for track in sssekai_global.timeline_tracks:
             for diagnostic in track.diagnostics:
                 logger.warning("Skipping Timeline clip in %s: %s", track.name, diagnostic)
