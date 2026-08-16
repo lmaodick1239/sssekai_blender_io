@@ -53,3 +53,15 @@ No local Blender executable or Blender 5 bundled Python runtime is available. Bl
 ## Commit Scope
 
 The Task 6 commit is limited to the requested test, documentation, README, and report/verification artifacts. Existing unrelated worktree changes are not included.
+
+## Review Remediation
+
+The Task 6 review finding was corrected without changing production code. The synthetic Timeline body track now authors three clips: a two-second clip at 0 seconds, a two-second clip at 5 seconds, and a two-second clip at 6 seconds. This preserves the authored 3-second gap between the first two body clips and introduces an authored overlap between the second and third body clips.
+
+The overlap regression places every body clip produced by `catalog_timeline_tracks()` and asserts that the resolver-produced overlapping placements occupy separate NLA tracks. It no longer changes clip timing after resolution. Body/face matching starts, append-after-body endpoint coverage (now frame 80), and face-target immutability remain covered.
+
+Verification after remediation:
+
+- `python3 tests/test_timeline_end_to_end.py`: PASS (`task 6 end-to-end tests passed`).
+- `python3 -m py_compile blender/core/timeline.py blender/core/helpers.py blender/core/animation.py blender/operators/importer.py blender/panels/importer.py`: PASS.
+- `git diff --check`: PASS.

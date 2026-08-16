@@ -169,17 +169,25 @@ class Action:
 
 
 def _graph():
-    starts = (0.0, 5.0)
-    durations = (2.0, 2.0)
+    body_starts = (0.0, 5.0, 6.0)
+    body_durations = (2.0, 2.0, 2.0)
+    face_starts = (0.0, 5.0)
+    face_durations = (2.0, 2.0)
     body = Track(
         "Character0",
         "Motion Group",
-        [Clip(f"body-{index}", start, duration) for index, (start, duration) in enumerate(zip(starts, durations))],
+        [
+            Clip(f"body-{index}", start, duration)
+            for index, (start, duration) in enumerate(zip(body_starts, body_durations))
+        ],
     )
     face = Track(
         "Character0_face",
         "Face  Group",
-        [Clip(f"face-{index}", start, duration) for index, (start, duration) in enumerate(zip(starts, durations))],
+        [
+            Clip(f"face-{index}", start, duration)
+            for index, (start, duration) in enumerate(zip(face_starts, face_durations))
+        ],
     )
     return [Reader(body, 100), Reader(face, 200)]
 
@@ -212,9 +220,9 @@ def test_synthetic_timeline_preserves_authored_starts_and_gaps():
     body_placements = _place_track(body_track, body)
     face_placements = _place_track(face_track, face)
 
-    assert [spec.start_seconds for spec in body_track.clips] == [0.0, 5.0]
+    assert [spec.start_seconds for spec in body_track.clips] == [0.0, 5.0, 6.0]
     assert [spec.start_seconds for spec in face_track.clips] == [0.0, 5.0]
-    assert [strip.frame_start for _, _, strip in body_placements] == [0.0, 50.0]
+    assert [strip.frame_start for _, _, strip in body_placements] == [0.0, 50.0, 60.0]
     assert [strip.frame_start for _, _, strip in face_placements] == [0.0, 50.0]
     assert body_placements[0][2].frame_end == 20.0
     assert body_placements[1][2].frame_start == 50.0
@@ -224,22 +232,9 @@ def test_synthetic_timeline_preserves_authored_starts_and_gaps():
 def test_synthetic_timeline_overlap_allocates_separate_track():
     tracks = TIMELINE.catalog_timeline_tracks(_graph())
     body = Target("body")
-    first = _place_track(tracks[0], body)[0][2]
-
-    overlap_spec = tracks[0].clips[1]
-    overlap_frames = TIMELINE.timeline_clip_frames(
-        overlap_spec, 10.0
-    )
-    overlap = HELPERS.place_action_strip(
-        body,
-        Action("overlap", (overlap_frames.action_start, overlap_frames.action_end)),
-        10.0,
-        20.0,
-        overlap_frames.action_start,
-        overlap_frames.action_end,
-        tracks[0].name,
-        name="overlap",
-    )
+    placements = _place_track(tracks[0], body)
+    first = placements[1][2]
+    overlap = placements[2][2]
 
     tracks_for_body = body.animation_data.nla_tracks
     assert first in tracks_for_body[0].strips
@@ -271,8 +266,8 @@ def test_standalone_body_append_starts_after_body_endpoint_and_preserves_face():
         name=action.name,
     )
 
-    assert appended.frame_start == 70.0
-    assert appended.frame_start >= 70.0
+    assert appended.frame_start == 80.0
+    assert appended.frame_start >= 80.0
     assert tuple(
         (strip.name, strip.frame_start, strip.frame_end)
         for track in face.animation_data.nla_tracks
