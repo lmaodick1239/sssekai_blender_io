@@ -103,6 +103,16 @@ class FakeTrack:
         self.diagnostics = ()
 
 
+class FakeBone(dict):
+    def __init__(self, name, parent=None, **properties):
+        super().__init__(properties)
+        self.name = name
+        self.parent = parent
+        self.children = []
+        if parent is not None:
+            parent.children.append(self)
+
+
 class FakeObject:
     def __init__(self, name, object_type):
         self.name = name
@@ -152,6 +162,7 @@ def _load_operator_class():
         "KEY_SEKAI_CHARACTER_BODY_OBJ": "body",
         "KEY_SEKAI_CHARACTER_FACE_OBJ": "face",
         "KEY_HIERARCHY_BONE_NAME": "unity_name",
+        "KEY_HIERARCHY_BONE_ROOT": "hierarchy_root",
         "KEY_SHAPEKEY_HASH_TABEL": "hash_table",
         "crc32": lambda value: hash(value),
         "json": __import__("json"),
@@ -274,6 +285,27 @@ def test_body_only_ignores_stale_face_selection_and_face_target():
     assert [kind for kind, _, _ in loads] == ["body"]
     assert all(strip.target is controller["body"] for strip in placements)
     assert controller["face"] not in [strip.target for strip in placements]
+
+
+def test_body_tos_leaf_skips_marked_synthetic_root_prefix():
+    Operator = _load_operator_class()
+    synthetic_root = FakeBone(
+        "body", unity_name="body", hierarchy_root=True
+    )
+    body_bone = FakeBone("Body", synthetic_root, unity_name="Body")
+    position_bone = FakeBone("Position", synthetic_root, unity_name="Position")
+    target = SimpleNamespace(
+        name="body",
+        data=SimpleNamespace(bones=[synthetic_root, body_bone, position_bone]),
+    )
+    crc = Operator._body_tos_leaf.__globals__["crc32"]
+
+    mapping = Operator._body_tos_leaf(target)
+
+    assert mapping[crc("Body")] == "Body"
+    assert mapping[crc("Position")] == "Position"
+    assert crc("body/Body") not in mapping
+    assert crc("body/Position") not in mapping
 
 
 def test_body_armature_is_active_during_motion_load_and_controller_is_restored():
