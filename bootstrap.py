@@ -5,8 +5,8 @@ bl_info = {
     "blender": (4, 0, 0),
     "description": "SSSekai Blender IO Addon Bootstrapper. This is NOT the actual addon. Please Enable for more info.",
     "warning": "",
-    "wiki_url": "https://github.com/mos9527/sssekai_blender_io/wiki",
-    "tracker_url": "https://github.com/mos9527/sssekai_blender_io",
+    "wiki_url": "https://github.com/lmaodick1239/sssekai_blender_io/wiki",
+    "tracker_url": "https://github.com/lmaodick1239/sssekai_blender_io",
     "category": "Import-Export",
 }
 
@@ -212,7 +212,7 @@ class SSSekaiUpdateAddonOperator(bpy.types.Operator):
                         [
                             "git",
                             "clone",
-                            "https://github.com/mos9527/sssekai_blender_io",
+                            "https://github.com/lmaodick1239/sssekai_blender_io",
                             ADDON_INSTALLATION_LINK_FOLDER,
                         ],
                         cwd=os.path.dirname(install_path),
