@@ -12,3 +12,10 @@ venv
 .DS_Store
 *.bundled.zip
 .vs/
+xtract/
+docs/superpowers/plans/2026-08-14-unity-timeline-motion-face-sequencing.md
+.gitignore
+docs/superpowers/specs/2026-08-14-unity-timeline-motion-face-sequencing-design.md
+.superpowers/sdd/2026-08-14-unity-timeline-motion-face-sequencing/task-1-report.md
+.superpowers/sdd/2026-08-14-unity-timeline-motion-face-sequencing/task-1-report.md
+.superpowers/sdd/2026-08-14-unity-timeline-motion-face-sequencing/task-1-report.md

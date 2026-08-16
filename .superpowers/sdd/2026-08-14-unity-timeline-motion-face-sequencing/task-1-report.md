@@ -80,3 +80,13 @@ PENDING
 - No code path reads or parses `xtract/mvdata.json`.
 - No changes were made to existing importer, animation, helper, panel, or package initialization code.
 - Runtime pytest success remains unconfirmed until executed in an environment with compatible project dependencies and pytest available.
+
+## Re-review fix report
+
+- Restored the checkout-compatible test import root in [`tests/test_timeline_resolver.py`](../../../tests/test_timeline_resolver.py:7) to `Path(__file__).resolve().parents[2]`, which exposes the top-level `sssekai_blender_io` package from this repository layout.
+- No resolver implementation changes were made, and Tasks 2–6 remain untouched.
+- `.venv/bin/python -m py_compile blender/core/timeline.py tests/test_timeline_resolver.py` passed with exit code 0.
+- The direct resolver harness passed after loading [`blender/core/timeline.py`](../../../blender/core/timeline.py) directly, covering motion-track classification, asset/playable/animation traversal, display name, start time, and animation reader ID.
+- The import-root probe reproduced the finding: `parents[1]` raised `ModuleNotFoundError` for `sssekai_blender_io`; `parents[2]` reached the package, after which the non-Blender environment was blocked by missing `mathutils.Matrix`.
+- Focused pytest remains blocked in this environment because the bundled virtual environment has no `pytest` module and no Blender runtime is installed.
+- The scoped fix commit is recorded after the one-file commit is created.
