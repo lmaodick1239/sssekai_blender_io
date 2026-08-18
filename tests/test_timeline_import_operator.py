@@ -172,6 +172,7 @@ def _load_operator_class():
             action_start=0.0,
             action_end=30.0,
         ),
+        "timeline_scene_frame_end": lambda value: int(value),
     }
     exec(compile(module, str(OPERATOR_SOURCE), "exec"), namespace)
     return namespace["SSSekaiBlenderImportSekaiTimelineOperator"]
@@ -359,6 +360,32 @@ def test_timeline_import_preserves_authored_starts_despite_existing_body_and_fac
         ("face-clip", 0.0),
         ("body-only", 60.0),
     ]
+
+
+def test_multiple_motion_clips_keep_order_and_full_authored_duration_when_second_action_is_shorter():
+    body = FakeTrack(
+        "motion",
+        "MOTION",
+        FakeSpec("first", order=0),
+        FakeSpec("second", order=1),
+    )
+
+    def load_body(name, animation, target, mapping):
+        action = FakeAction(name)
+        action.frame_range = (0.0, 20.0 if name == "second" else 30.0)
+        return action
+
+    result, placements, reports, loads, controller, actions = _operator_harness(
+        body,
+        body_loader=load_body,
+    )
+
+    assert result == {"FINISHED"}
+    assert [kind for kind, _, _ in loads] == ["body", "body"]
+    assert [strip.name for strip in placements] == ["first", "second"]
+    assert [strip.frame_start for strip in placements] == [0.0, 60.0]
+    assert [strip.frame_end for strip in placements] == [30.0, 90.0]
+    assert controller.view_layer_objects.active is controller
 
 
 def test_invalid_clip_is_skipped_and_summary_identifies_track_and_clip():

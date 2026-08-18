@@ -21,6 +21,7 @@ from ..core.helpers import (
     create_action,
     apply_action,
     action_curve_count,
+    extend_action_hold,
     editbone_children_recursive,
     armature_editbone_children_recursive,
     set_obj_bone_parent,
@@ -52,7 +53,11 @@ from ..core.animation import (
 from ..core.types import Hierarchy
 from ..core.math import blVector, blEuler, blMatrix, xform_to_matrix
 from ..core.helpers import apply_pose_matrix
-from ..core.timeline import timeline_clip_frames, validate_timeline_clip
+from ..core.timeline import (
+    timeline_clip_frames,
+    timeline_scene_frame_end,
+    validate_timeline_clip,
+)
 from .. import register_class, register_wm_props, logger
 from .. import sssekai_global
 from ..operators.material import (
@@ -1010,6 +1015,9 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
         for track, spec, frames, action, target in sorted(
             prepared, key=lambda item: (item[2].timeline_start, item[1].source_order)
         ):
+            _, action_frame_end = action.frame_range
+            if action_frame_end < frames.action_end:
+                extend_action_hold(action, frames.action_end)
             strip = place_action_strip(
                 target,
                 action,
@@ -1022,17 +1030,18 @@ class SSSekaiBlenderImportSekaiTimelineOperator(bpy.types.Operator):
             )
             largest_end = max(largest_end, strip.frame_end)
             getattr(logger, "debug", lambda *_args, **_kwargs: None)(
-                "Timeline import placement complete: kind=%s clip=%r frame_start=%r frame_end=%r action_frame_start=%r action_frame_end=%r track=%r target=%r",
+                "Timeline import placement complete: kind=%s clip=%r frame_start=%r frame_end=%r action_frame_start=%r action_frame_end=%r authored_action_end=%r track=%r target=%r",
                 track.kind,
                 spec.display_name,
                 strip.frame_start,
                 strip.frame_end,
                 getattr(strip, "action_frame_start", None),
                 getattr(strip, "action_frame_end", None),
+                frames.action_end,
                 track.name,
                 getattr(target, "name", None),
             )
-        final_frame_end = int(math.ceil(largest_end))
+        final_frame_end = timeline_scene_frame_end(largest_end)
         getattr(logger, "info", lambda *_args, **_kwargs: None)(
             "Timeline import final range: largest_end=%r final_scene_frame_end=%r rigidbody_present=%s",
             largest_end,

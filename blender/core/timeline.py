@@ -267,6 +267,16 @@ def _finite_number(value: Any, label: str) -> float:
     return number
 
 
+def timeline_scene_frame_end(frame_end: Any) -> int:
+    """Convert a computed endpoint to an integer frame without float-noise overshoot."""
+
+    endpoint = _finite_number(frame_end, "scene frame end")
+    nearest = round(endpoint)
+    if abs(endpoint - nearest) <= _FRAME_TOLERANCE:
+        return int(nearest)
+    return int(math.ceil(endpoint))
+
+
 def timeline_clip_frames(spec: TimelineClipSpec, fps: float) -> TimelineFrameRange:
     """Convert authored Timeline seconds to scene frames using one FPS."""
 
@@ -343,15 +353,17 @@ def validate_timeline_clip(
         raise ValueError("action_frame_range must contain two finite frames") from error
     if action_end <= action_start:
         raise ValueError("action frame range must be increasing")
-    if (
-        frames.action_start < action_start - _FRAME_TOLERANCE
-        or frames.action_end > action_end + _FRAME_TOLERANCE
-    ):
+    if frames.action_start < action_start - _FRAME_TOLERANCE:
         raise ValueError(
-            "requested Timeline source window is outside generated Action frame range"
+            "requested Timeline source window starts before generated Action frame range"
         )
 
     warnings: list[str] = []
+    if frames.action_end > action_end + _FRAME_TOLERANCE:
+        warnings.append(
+            "generated Action is shorter than the authored Timeline source window; "
+            "the final pose will be held for the remaining Timeline duration"
+        )
     if any(
         _metadata_enabled(spec.transition_metadata.get(field))
         for field in _TRANSITION_FIELDS

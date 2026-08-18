@@ -145,6 +145,42 @@ class FakeAction:
         self.slots = [SimpleNamespace(target_id_type=slot_type)]
 
 
+class FakeKeyframePoints(list):
+    def insert(self, frame, value):
+        point = SimpleNamespace(co=(frame, value))
+        self.append(point)
+        self.sort(key=lambda item: item.co[0])
+        return point
+
+
+class FakeCurve:
+    def __init__(self, points):
+        self.keyframe_points = FakeKeyframePoints(
+            SimpleNamespace(co=point) for point in points
+        )
+        self.updated = False
+
+    def evaluate(self, frame):
+        return self.keyframe_points[-1].co[1]
+
+    def update(self):
+        self.updated = True
+
+
+class FakeActionWithCurves:
+    def __init__(self):
+        self.fcurves = [FakeCurve([(0.0, 0.0), (10.0, 1.0)])]
+
+    @property
+    def frame_range(self):
+        frames = [
+            point.co[0]
+            for curve in self.fcurves
+            for point in curve.keyframe_points
+        ]
+        return min(frames), max(frames)
+
+
 def _spec(**changes):
     values = dict(
         source_id=1,
@@ -196,10 +232,43 @@ def test_timeline_frames_reject_invalid_duration_scale_and_clip_in():
         _raises(ValueError, lambda fps=fps: TIMELINE.timeline_clip_frames(_spec(), fps))
 
 
+def test_scene_frame_end_snaps_float_noise_without_truncating_fractional_endpoints():
+    assert TIMELINE.timeline_scene_frame_end(8023.000000004) == 8023
+    assert TIMELINE.timeline_scene_frame_end(8023.25) == 8024
+
+
+def test_extend_action_hold_adds_one_terminal_key_without_changing_existing_motion():
+    action = FakeActionWithCurves()
+
+    assert HELPERS.extend_action_hold(action, 20.0) is True
+    assert action.frame_range == (0.0, 20.0)
+    assert [point.co for point in action.fcurves[0].keyframe_points] == [
+        (0.0, 0.0),
+        (10.0, 1.0),
+        (20.0, 1.0),
+    ]
+    assert action.fcurves[0].updated is True
+    assert HELPERS.extend_action_hold(action, 20.0) is False
+    assert len(action.fcurves[0].keyframe_points) == 3
+
+
 def test_validation_accepts_positive_clip_in_with_full_source_action_range():
     spec = _spec(clip_in_seconds=0.5, duration_seconds=1.0, time_scale=1.0)
 
     assert TIMELINE.validate_timeline_clip(spec, (0.0, 90.0), 30.0) == []
+
+
+def test_validation_preserves_authored_timeline_window_when_action_is_shorter():
+    spec = _spec(
+        start_seconds=66.66666666666673,
+        duration_seconds=67.05,
+        clip_in_seconds=0.0,
+        time_scale=1.0,
+    )
+
+    warnings = TIMELINE.validate_timeline_clip(spec, (0.0, 58.35 * 60.0), 60.0)
+
+    assert any("shorter" in warning.lower() for warning in warnings)
 
 
 def test_validation_rejects_requested_window_outside_action_and_returns_semantic_warnings():
@@ -223,7 +292,7 @@ def test_validation_rejects_requested_window_outside_action_and_returns_semantic
     assert "foot" in warning_text
     _raises(
         ValueError,
-        lambda: TIMELINE.validate_timeline_clip(spec, (0.0, 194.0), 30.0),
+        lambda: TIMELINE.validate_timeline_clip(spec, (16.0, 195.0), 30.0),
     )
 
 
@@ -287,6 +356,30 @@ def test_place_action_strip_reuses_gap_and_separates_overlap_without_truncation(
     assert gap.frame_start == 200.5
     assert gap.frame_end == 205.75
     assert first.influence > 0.0
+
+
+def test_short_generated_action_keeps_authored_timeline_duration_with_clamped_source_end():
+    target = FakeTarget()
+    action = FakeAction(frame_range=(0.0, 58.35 * 60.0))
+    authored_timeline_start = 66.66666666666673 * 60.0
+    authored_timeline_duration = 67.05 * 60.0
+    placed_action_end = min(authored_timeline_duration, action.frame_range[1])
+
+    strip = HELPERS.place_action_strip(
+        target,
+        action,
+        authored_timeline_start,
+        authored_timeline_duration,
+        0.0,
+        placed_action_end,
+        "Motion Group",
+        name="short-generated-action",
+    )
+
+    assert strip.frame_start == authored_timeline_start
+    assert strip.frame_end == authored_timeline_start + authored_timeline_duration
+    assert strip.action_frame_start == 0.0
+    assert strip.action_frame_end == action.frame_range[1]
 
 
 def test_append_start_frame_isolated_to_target_nla_tracks():

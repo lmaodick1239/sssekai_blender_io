@@ -117,13 +117,24 @@ def test_catalog_discovers_recognized_tracks_and_formats_searchable_labels():
 
     assert [track.name for track in tracks] == ["Character0", "Character0_insert"]
     assert [entry[1] for entry in timeline_track_enum(tracks)] == [
-        "Motion Group / Character0 / 2 clips",
-        "Face  Group / Character0_insert / 7 clips",
+        "Motion Group / Character0 / raw clip 0 / 2 clips",
+        "Face  Group / Character0_insert / raw clip 0 / 7 clips",
     ]
     assert [entry[0] for entry in timeline_track_enum(tracks)] == [
         f"{id(assets_file)}:10",
         f"{id(assets_file)}:20",
     ]
+
+
+def test_timeline_track_enum_uses_placeholder_for_tracks_without_resolved_clips():
+    catalog = _load_catalog_functions()
+    empty_track = catalog["catalog_timeline_tracks"]([
+        make_track("Character_empty", "Motion Group", 50, object(), 0),
+    ])[0]
+
+    assert catalog["timeline_track_enum"]([empty_track])[0][1] == (
+        "Motion Group / Character_empty / <no clips> / 0 clips"
+    )
 
 
 def test_catalog_ids_include_assets_file_identity_and_path_id_not_display_name():

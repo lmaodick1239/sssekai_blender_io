@@ -70,7 +70,9 @@ def timeline_track_enum(tracks):
     return [
         (
             str(track.source_id),
-            f"{track.parent_name} / {track.name} / {len(track.clips)} clips",
+            f"{track.parent_name} / {track.name} / "
+            f"{track.clips[0].display_name if track.clips else '<no clips>'} / "
+            f"{len(track.clips)} clips",
             "",
             icons[track.kind],
             index,

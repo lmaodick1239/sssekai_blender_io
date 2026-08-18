@@ -263,6 +263,32 @@ def action_curve_count(action: bpy.types.Action) -> int:
     return count
 
 
+def extend_action_hold(action: bpy.types.Action, end_frame: float) -> bool:
+    """Hold every Action curve at ``end_frame`` without changing source keys."""
+    fcurves = getattr(action, "fcurves", None)
+    if fcurves is None:
+        fcurves = (
+            fcurve
+            for layer in action.layers
+            for strip in layer.strips
+            for slot in action.slots
+            for channelbag in (strip.channelbag(slot),)
+            if channelbag is not None
+            for fcurve in channelbag.fcurves
+        )
+
+    extended = False
+    for fcurve in fcurves:
+        points = fcurve.keyframe_points
+        if any(point.co[0] == end_frame for point in points):
+            continue
+        final_frame = points[-1].co[0]
+        points.insert(end_frame, fcurve.evaluate(final_frame))
+        fcurve.update()
+        extended = True
+    return extended
+
+
 def apply_action(
     object: bpy.types.ID,
     action: bpy.types.Action,
